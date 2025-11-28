@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "cargo clippy --all-features && cargo fmt --all && cargo sort && taplo fmt Cargo.toml --option reorder_keys=true Cargo.toml",
+            "type": "command"
+          }
+        ],
+        "matcher": "Write|Edit|MultiEdit"
+      }
+    ]
+  }
+}
