@@ -46,6 +46,12 @@ async fn main() {
 async fn run() -> Result<()> {
     let args = Args::parse_args();
 
+    // Get prompt from args or open editor
+    let prompt = match args.prompt.clone() {
+        Some(p) => p,
+        None => cli::open_editor_for_prompt()?,
+    };
+
     // Resolve working directory
     let working_dir = PathBuf::from(&args.directory).canonicalize()?;
 
@@ -72,7 +78,7 @@ async fn run() -> Result<()> {
     cli::show_running_message(&executor_names);
 
     // Run the task
-    let results = runner.run(&args.prompt, executors).await?;
+    let results = runner.run(&prompt, executors).await?;
 
     if results.is_empty() {
         cli::show_progress("No results were produced.");

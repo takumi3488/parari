@@ -5,9 +5,8 @@ use clap::Parser;
 #[command(name = "parari")]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
-    /// The prompt/task to send to AI CLI tools
-    #[arg(required = true)]
-    pub prompt: String,
+    /// The prompt/task to send to AI CLI tools (opens editor if not provided)
+    pub prompt: Option<String>,
 
     /// Use only Claude CLI
     #[arg(long, conflicts_with_all = &["gemini_only", "codex_only"])]
@@ -74,7 +73,7 @@ mod tests {
     #[test]
     fn test_executor_filter_default() {
         let args = Args {
-            prompt: "test".to_string(),
+            prompt: Some("test".to_string()),
             claude_only: false,
             gemini_only: false,
             codex_only: false,
@@ -90,7 +89,7 @@ mod tests {
     #[test]
     fn test_executor_filter_claude_only() {
         let args = Args {
-            prompt: "test".to_string(),
+            prompt: Some("test".to_string()),
             claude_only: true,
             gemini_only: false,
             codex_only: false,

@@ -39,6 +39,9 @@ pub enum Error {
 
     #[error("User cancelled the operation")]
     UserCancelled,
+
+    #[error("Editor failed: {message}")]
+    EditorFailed { message: String },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
