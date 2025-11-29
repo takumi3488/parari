@@ -4,20 +4,15 @@ use tokio::process::Command;
 
 use crate::error::{Error, Result};
 
-/// Get the diff between two directories (worktree vs original)
-pub async fn get_diff(original: &Path, worktree: &Path) -> Result<String> {
+/// Get the diff of changes in a worktree compared to HEAD
+pub async fn get_diff(_original: &Path, worktree: &Path) -> Result<String> {
     let output = Command::new("git")
-        .args([
-            "diff",
-            "--no-index",
-            "--",
-            original.to_str().unwrap(),
-            worktree.to_str().unwrap(),
-        ])
+        .args(["diff", "HEAD"])
+        .current_dir(worktree)
         .output()
         .await?;
 
-    // git diff --no-index returns 1 if there are differences, 0 if none
+    // git diff returns 1 if there are differences, 0 if none
     // It's not an error, just means there are changes
     let diff = String::from_utf8_lossy(&output.stdout).to_string();
     Ok(diff)
@@ -110,44 +105,41 @@ pub struct ChangeSummary {
     pub changed_files: Vec<String>,
 }
 
-/// Get a summary of changes in a worktree compared to original
-pub async fn get_change_summary(original: &Path, worktree: &Path) -> Result<ChangeSummary> {
+/// Get a summary of changes in a worktree compared to HEAD
+pub async fn get_change_summary(_original: &Path, worktree: &Path) -> Result<ChangeSummary> {
+    // Use git status --porcelain to get all changes including untracked files
     let output = Command::new("git")
-        .args([
-            "diff",
-            "--no-index",
-            "--stat",
-            "--",
-            original.to_str().unwrap(),
-            worktree.to_str().unwrap(),
-        ])
+        .args(["status", "--porcelain"])
+        .current_dir(worktree)
         .output()
         .await?;
 
-    let stat = String::from_utf8_lossy(&output.stdout);
+    let status = String::from_utf8_lossy(&output.stdout);
 
-    // Parse the stat output to count changes
     let mut files_added = 0;
     let mut files_modified = 0;
     let mut files_deleted = 0;
     let mut changed_files = Vec::new();
 
-    for line in stat.lines() {
-        if line.contains(" | ") {
-            let parts: Vec<&str> = line.split(" | ").collect();
-            if let Some(file_part) = parts.first() {
-                let file_name = file_part.trim().to_string();
-                changed_files.push(file_name);
-            }
+    for line in status.lines() {
+        if line.len() < 3 {
+            continue;
+        }
 
-            // Simple heuristic: count insertions/deletions
-            if line.contains("(new)") {
-                files_added += 1;
-            } else if line.contains("(gone)") {
-                files_deleted += 1;
-            } else {
-                files_modified += 1;
-            }
+        let status_code = &line[0..2];
+        let file_name = line[3..].to_string();
+        changed_files.push(file_name);
+
+        // Parse status codes:
+        // ?? = untracked (new file)
+        // A  = added (staged)
+        // M  = modified
+        // D  = deleted
+        // First char = staged status, second char = unstaged status
+        match status_code {
+            "??" | "A " | " A" => files_added += 1,
+            "D " | " D" => files_deleted += 1,
+            _ => files_modified += 1,
         }
     }
 
