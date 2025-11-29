@@ -386,6 +386,66 @@ pub fn show_running_message(executor_names: &[&str]) {
     println!("\nThis may take a while...\n");
 }
 
+/// Display warning about uncommitted changes and ask for confirmation
+pub fn confirm_overwrite_uncommitted(uncommitted_files: &[String]) -> Result<bool> {
+    use crossterm::style::Stylize;
+
+    println!(
+        "\n{}",
+        "Warning: You have uncommitted changes!".yellow().bold()
+    );
+    println!("The following files will be overwritten:\n");
+
+    for file in uncommitted_files.iter().take(10) {
+        println!("  {}", file.as_str().yellow());
+    }
+
+    if uncommitted_files.len() > 10 {
+        println!("  ... and {} more files", uncommitted_files.len() - 10);
+    }
+
+    println!();
+    print!("Do you want to continue? [y/N]: ");
+    std::io::Write::flush(&mut std::io::stdout())?;
+
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+
+    let answer = input.trim().to_lowercase();
+    Ok(answer == "y" || answer == "yes")
+}
+
+/// Display warning about conflicting files and ask for confirmation
+pub fn confirm_apply_with_conflicts(conflicts: &[String]) -> Result<bool> {
+    use crossterm::style::Stylize;
+
+    println!(
+        "\n{}",
+        "Warning: The following files have conflicts!".red().bold()
+    );
+    println!(
+        "These files have been modified both in your working directory and the selected result:\n"
+    );
+
+    for file in conflicts.iter().take(10) {
+        println!("  {}", file.as_str().red());
+    }
+
+    if conflicts.len() > 10 {
+        println!("  ... and {} more files", conflicts.len() - 10);
+    }
+
+    println!("\nApplying will overwrite your local changes in these files.");
+    print!("Do you want to continue? [y/N]: ");
+    std::io::Write::flush(&mut std::io::stdout())?;
+
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+
+    let answer = input.trim().to_lowercase();
+    Ok(answer == "y" || answer == "yes")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

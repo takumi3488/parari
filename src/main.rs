@@ -102,6 +102,27 @@ async fn run() -> Result<()> {
     let selected_result = &results[selected_index];
     let selected_info = &result_infos[selected_index];
 
+    // Check for conflicts before applying
+    let conflicts = git::check_conflicts(&selected_result.worktree_path, &working_dir).await?;
+
+    if !conflicts.is_empty() {
+        // There are conflicting files
+        if !cli::confirm_apply_with_conflicts(&conflicts)? {
+            cli::show_progress("Apply cancelled.");
+            runner.cleanup().await?;
+            return Err(Error::UserCancelled);
+        }
+    } else {
+        // No conflicts, but check if target has uncommitted changes
+        let uncommitted_files = git::get_uncommitted_files(&working_dir).await?;
+        if !uncommitted_files.is_empty() && !cli::confirm_overwrite_uncommitted(&uncommitted_files)?
+        {
+            cli::show_progress("Apply cancelled.");
+            runner.cleanup().await?;
+            return Err(Error::UserCancelled);
+        }
+    }
+
     cli::show_applying_message(&selected_info.executor_name);
     domain::apply_result(selected_result, &working_dir).await?;
     cli::show_success_message();

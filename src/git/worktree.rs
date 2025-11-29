@@ -46,7 +46,8 @@ pub async fn get_repo_root(path: &Path) -> Result<PathBuf> {
 
 /// Create a worktree for the given executor
 ///
-/// Returns the path to the created worktree
+/// Returns the path to the created worktree.
+/// This also copies uncommitted changes from the source repository to the worktree.
 pub async fn create_worktree(repo_path: &Path, executor_name: &str) -> Result<WorktreeInfo> {
     let timestamp = chrono::Utc::now().format("%Y%m%d%H%M%S%3f").to_string();
     let worktree_name = format!("{}-{}", timestamp, executor_name);
@@ -74,11 +75,105 @@ pub async fn create_worktree(repo_path: &Path, executor_name: &str) -> Result<Wo
         });
     }
 
+    // Copy uncommitted changes from source repository to worktree
+    copy_uncommitted_changes(repo_path, &worktree_path).await?;
+
     Ok(WorktreeInfo {
         path: worktree_path,
         executor_name: executor_name.to_string(),
         timestamp,
     })
+}
+
+/// Copy uncommitted changes from source repository to worktree
+async fn copy_uncommitted_changes(source: &Path, worktree: &Path) -> Result<()> {
+    // Get list of changed files (both staged and unstaged, including untracked)
+    let output = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(source)
+        .output()
+        .await?;
+
+    let status = String::from_utf8_lossy(&output.stdout);
+
+    for line in status.lines() {
+        if line.len() < 3 {
+            continue;
+        }
+
+        let status_code = &line[0..2];
+        let file_path = &line[3..];
+
+        // Skip deleted files
+        if status_code == "D " || status_code == " D" || status_code == "DD" {
+            // For deleted files, also delete in worktree
+            let dst_path = worktree.join(file_path);
+            if dst_path.exists() {
+                let _ = tokio::fs::remove_file(&dst_path).await;
+            }
+            continue;
+        }
+
+        // Handle renamed files (R status shows "old -> new")
+        let actual_path = if status_code.starts_with('R') {
+            // Format: "R  old_name -> new_name"
+            if let Some(arrow_pos) = file_path.find(" -> ") {
+                &file_path[arrow_pos + 4..]
+            } else {
+                file_path
+            }
+        } else {
+            file_path
+        };
+
+        let src_path = source.join(actual_path);
+        let dst_path = worktree.join(actual_path);
+
+        // Copy file if it exists
+        if src_path.exists() && src_path.is_file() {
+            // Ensure parent directory exists
+            if let Some(parent) = dst_path.parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
+            tokio::fs::copy(&src_path, &dst_path).await?;
+        } else if src_path.is_dir() {
+            // Copy directory recursively
+            copy_dir_to_worktree(&src_path, &dst_path).await?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Copy a directory recursively (used for copying uncommitted directories)
+#[async_recursion::async_recursion]
+async fn copy_dir_to_worktree(src: &Path, dst: &Path) -> Result<()> {
+    tokio::fs::create_dir_all(dst).await?;
+
+    let mut entries = tokio::fs::read_dir(src).await?;
+
+    while let Some(entry) = entries.next_entry().await? {
+        let file_name = entry.file_name();
+        let file_name_str = file_name.to_str().unwrap_or("");
+
+        // Skip .git directory
+        if file_name_str == ".git" {
+            continue;
+        }
+
+        let src_path = entry.path();
+        let dst_path = dst.join(&file_name);
+
+        let file_type = entry.file_type().await?;
+
+        if file_type.is_dir() {
+            copy_dir_to_worktree(&src_path, &dst_path).await?;
+        } else if file_type.is_file() {
+            tokio::fs::copy(&src_path, &dst_path).await?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Remove a worktree

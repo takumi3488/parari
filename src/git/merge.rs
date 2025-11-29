@@ -2,49 +2,58 @@ use std::path::Path;
 
 use tokio::process::Command;
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 
-/// Apply changes from a worktree to the target directory using rsync-like copy
-///
-/// This copies all files from the worktree to the target, excluding .git
-pub async fn apply_changes(worktree: &Path, target: &Path) -> Result<()> {
-    // Use rsync if available, otherwise fall back to manual copy
-    let rsync_available = Command::new("which")
-        .arg("rsync")
-        .output()
-        .await
-        .is_ok_and(|o| o.status.success());
-
-    if rsync_available {
-        apply_with_rsync(worktree, target).await
-    } else {
-        apply_with_copy(worktree, target).await
-    }
-}
-
-async fn apply_with_rsync(worktree: &Path, target: &Path) -> Result<()> {
-    let output = Command::new("rsync")
-        .args([
-            "-av",
-            "--exclude=.git",
-            &format!("{}/", worktree.to_str().unwrap()),
-            target.to_str().unwrap(),
-        ])
+/// Check if target directory has uncommitted changes
+pub async fn has_uncommitted_changes(target: &Path) -> Result<bool> {
+    let output = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(target)
         .output()
         .await?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(Error::GitCommand {
-            message: format!("rsync failed: {}", stderr),
-        });
-    }
-
-    Ok(())
+    let status = String::from_utf8_lossy(&output.stdout);
+    Ok(!status.trim().is_empty())
 }
 
-async fn apply_with_copy(worktree: &Path, target: &Path) -> Result<()> {
-    // Walk through the worktree and copy files
+/// Get list of uncommitted files in target directory
+pub async fn get_uncommitted_files(target: &Path) -> Result<Vec<String>> {
+    let output = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(target)
+        .output()
+        .await?;
+
+    let status = String::from_utf8_lossy(&output.stdout);
+    let files: Vec<String> = status
+        .lines()
+        .filter(|line| line.len() >= 3)
+        .map(|line| line[3..].to_string())
+        .collect();
+
+    Ok(files)
+}
+
+/// Check for conflicts between worktree changes and target uncommitted changes
+///
+/// Returns a list of files that would conflict (exist in both worktree changes and target uncommitted changes)
+pub async fn check_conflicts(worktree: &Path, target: &Path) -> Result<Vec<String>> {
+    let worktree_changes = get_uncommitted_files(worktree).await?;
+    let target_changes = get_uncommitted_files(target).await?;
+
+    let conflicts: Vec<String> = worktree_changes
+        .iter()
+        .filter(|f| target_changes.contains(f))
+        .cloned()
+        .collect();
+
+    Ok(conflicts)
+}
+
+/// Apply changes from a worktree to the target directory
+///
+/// This copies all files from the worktree to the target, excluding .git
+pub async fn apply_changes(worktree: &Path, target: &Path) -> Result<()> {
     copy_dir_recursive(worktree, target).await
 }
 
