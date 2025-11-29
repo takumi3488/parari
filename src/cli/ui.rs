@@ -127,11 +127,6 @@ pub fn select_result(results: &[TaskResult], result_infos: &[ResultInfo]) -> Res
         return Err(Error::NoExecutorsAvailable);
     }
 
-    if results.len() == 1 {
-        println!("\nOnly one result available, auto-selecting...");
-        return Ok(0);
-    }
-
     loop {
         display_results_summary(result_infos);
 
