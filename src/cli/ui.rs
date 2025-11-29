@@ -2,7 +2,7 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode};
 use crossterm::terminal;
 use inquire::Select;
 
@@ -243,7 +243,7 @@ fn show_detail_view(info: &ResultInfo) -> DetailViewResult {
         // Show help message
         println!();
         println!(
-            "Press [Tab] for {}, [Shift+Enter] to apply, [Esc] to go back",
+            "Press [Tab] for {}, [a] to apply, [Esc] to go back",
             mode.next().name()
         );
 
@@ -259,7 +259,7 @@ fn show_detail_view(info: &ResultInfo) -> DetailViewResult {
                         mode = mode.next();
                         break None; // Redraw with new mode
                     }
-                    KeyCode::Enter if key_event.modifiers.contains(KeyModifiers::SHIFT) => {
+                    KeyCode::Char('a') | KeyCode::Char('A') => {
                         break Some(DetailViewResult::Apply);
                     }
                     KeyCode::Esc => {
