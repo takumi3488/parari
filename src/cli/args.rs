@@ -11,6 +11,11 @@ pub struct Args {
     /// Working directory (defaults to current directory)
     #[arg(short = 'C', long, default_value = ".")]
     pub directory: String,
+
+    /// Comma-separated list of agents to use (e.g., "claude,gemini")
+    /// Available agents: claude, gemini, codex
+    #[arg(short, long, value_delimiter = ',')]
+    pub agents: Option<Vec<String>>,
 }
 
 impl Args {

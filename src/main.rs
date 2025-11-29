@@ -68,7 +68,7 @@ async fn run() -> Result<()> {
     let mut runner = TaskRunner::new(&working_dir).await?;
 
     // Collect available executors
-    let executors = get_executors().await;
+    let executors = get_executors(args.agents.as_deref()).await;
 
     if executors.is_empty() {
         return Err(Error::NoExecutorsAvailable);
@@ -112,12 +112,29 @@ async fn run() -> Result<()> {
     Ok(())
 }
 
+/// Filter executors based on agent filter
+fn filter_executors(
+    executors: Vec<Arc<dyn Executor>>,
+    agent_filter: Option<&[String]>,
+) -> Vec<Arc<dyn Executor>> {
+    match agent_filter {
+        Some(agents) => executors
+            .into_iter()
+            .filter(|e| {
+                let name = e.name().to_lowercase();
+                agents.iter().any(|a| name.contains(&a.to_lowercase()))
+            })
+            .collect(),
+        None => executors,
+    }
+}
+
 /// Get all available executors (mock version for development/testing)
 #[cfg(feature = "mock")]
-async fn get_executors() -> Vec<Arc<dyn Executor>> {
+async fn get_executors(agent_filter: Option<&[String]>) -> Vec<Arc<dyn Executor>> {
     eprintln!("[MOCK MODE] Using mock executors for development");
 
-    vec![
+    let all_executors: Vec<Arc<dyn Executor>> = vec![
         Arc::new(
             MockExecutor::new("mock-claude")
                 .with_file("mock-claude-output.txt", "This is mock output from Claude"),
@@ -130,12 +147,14 @@ async fn get_executors() -> Vec<Arc<dyn Executor>> {
             MockExecutor::new("mock-codex")
                 .with_file("mock-codex-output.txt", "This is mock output from Codex"),
         ),
-    ]
+    ];
+
+    filter_executors(all_executors, agent_filter)
 }
 
 /// Get all available executors (production version)
 #[cfg(not(feature = "mock"))]
-async fn get_executors() -> Vec<Arc<dyn Executor>> {
+async fn get_executors(agent_filter: Option<&[String]>) -> Vec<Arc<dyn Executor>> {
     let mut executors: Vec<Arc<dyn Executor>> = Vec::new();
 
     let claude = Arc::new(ClaudeExecutor::new());
@@ -153,5 +172,5 @@ async fn get_executors() -> Vec<Arc<dyn Executor>> {
         executors.push(codex);
     }
 
-    executors
+    filter_executors(executors, agent_filter)
 }
