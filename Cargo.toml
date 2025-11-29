@@ -1,9 +1,9 @@
 [package]
-edition = "2024"
-name = "parari"
-version = "0.0.2"
 description = "A parallel AI agents runner"
+edition = "2024"
 license = "MIT"
+name = "parari"
+version = "0.0.3"
 
 [features]
 default = []
