@@ -50,7 +50,3 @@ parari
 ```
 
 If no prompt is provided, parari opens your default editor (set by `$EDITOR` environment variable, defaults to `vi`) where you can write a multi-line prompt.
-
-## License
-
-MIT
