@@ -13,7 +13,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6
         with:
           fetch-depth: 2
 
@@ -39,7 +39,7 @@ jobs:
 
       - name: Create GitHub Release
         if: steps.version.outputs.changed == 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@5be0e66d93ac7ed76da52eca8bb058f665c3a5fe # v2
         with:
           tag_name: v${{ steps.version.outputs.current }}
           name: v${{ steps.version.outputs.current }}
