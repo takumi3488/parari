@@ -3,7 +3,7 @@ description = "A parallel AI agents runner"
 edition = "2024"
 license = "Apache-2.0"
 name = "parari"
-version = "0.0.3"
+version = "0.0.4"
 
 [features]
 default = []
