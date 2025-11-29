@@ -3,6 +3,10 @@ edition = "2024"
 name = "parari"
 version = "0.1.0"
 
+[features]
+default = []
+mock = []    # Enable mock executors for development/testing
+
 [dependencies]
 async-recursion = "1.1.1"
 async-trait = "0.1.89"

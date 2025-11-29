@@ -4,9 +4,14 @@ use std::sync::Arc;
 use parari::cli::{Args, ExecutorFilter};
 use parari::domain::{self, DisplayOptions, TaskRunner, cleanup_all_registered_worktrees};
 use parari::error::{Error, Result};
+#[cfg(not(feature = "mock"))]
 use parari::executor::claude::ClaudeExecutor;
+#[cfg(not(feature = "mock"))]
 use parari::executor::codex::CodexExecutor;
+#[cfg(not(feature = "mock"))]
 use parari::executor::gemini::GeminiExecutor;
+#[cfg(feature = "mock")]
+use parari::executor::mock::MockExecutor;
 use parari::executor::traits::Executor;
 use parari::{cli, git};
 
@@ -113,7 +118,53 @@ async fn run() -> Result<()> {
     Ok(())
 }
 
-/// Get executors based on filter
+/// Get executors based on filter (mock version for development/testing)
+#[cfg(feature = "mock")]
+async fn get_executors(filter: &ExecutorFilter) -> Vec<Arc<dyn Executor>> {
+    eprintln!("[MOCK MODE] Using mock executors for development");
+
+    let mut executors: Vec<Arc<dyn Executor>> = Vec::new();
+
+    match filter {
+        ExecutorFilter::All => {
+            executors.push(Arc::new(MockExecutor::new("mock-claude").with_file(
+                "mock-claude-output.txt",
+                "This is mock output from Claude",
+            )));
+            executors.push(Arc::new(MockExecutor::new("mock-gemini").with_file(
+                "mock-gemini-output.txt",
+                "This is mock output from Gemini",
+            )));
+            executors.push(Arc::new(
+                MockExecutor::new("mock-codex")
+                    .with_file("mock-codex-output.txt", "This is mock output from Codex"),
+            ));
+        }
+        ExecutorFilter::ClaudeOnly => {
+            executors.push(Arc::new(MockExecutor::new("mock-claude").with_file(
+                "mock-claude-output.txt",
+                "This is mock output from Claude",
+            )));
+        }
+        ExecutorFilter::GeminiOnly => {
+            executors.push(Arc::new(MockExecutor::new("mock-gemini").with_file(
+                "mock-gemini-output.txt",
+                "This is mock output from Gemini",
+            )));
+        }
+        ExecutorFilter::CodexOnly => {
+            executors.push(Arc::new(
+                MockExecutor::new("mock-codex")
+                    .with_file("mock-codex-output.txt", "This is mock output from Codex"),
+            ));
+        }
+    }
+
+    executors
+}
+
+/// Get executors based on filter (production version)
+#[cfg(not(feature = "mock"))]
 async fn get_executors(filter: &ExecutorFilter) -> Vec<Arc<dyn Executor>> {
     let mut executors: Vec<Arc<dyn Executor>> = Vec::new();
 
