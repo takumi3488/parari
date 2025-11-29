@@ -2,6 +2,8 @@
 edition = "2024"
 name = "parari"
 version = "0.0.1"
+description = "A parallel AI agents runner"
+license = "MIT"
 
 [features]
 default = []
