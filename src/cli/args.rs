@@ -28,10 +28,6 @@ pub struct Args {
     #[arg(long)]
     pub no_select: bool,
 
-    /// Show diff output for each result
-    #[arg(long)]
-    pub show_diff: bool,
-
     /// Automatically select the result with most changes
     #[arg(long)]
     pub auto_select: bool,
@@ -79,7 +75,6 @@ mod tests {
             codex_only: false,
             directory: ".".to_string(),
             no_select: false,
-            show_diff: false,
             auto_select: false,
         };
 
@@ -95,7 +90,6 @@ mod tests {
             codex_only: false,
             directory: ".".to_string(),
             no_select: false,
-            show_diff: false,
             auto_select: false,
         };
 

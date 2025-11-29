@@ -4,20 +4,6 @@ use tokio::process::Command;
 
 use crate::error::{Error, Result};
 
-/// Get the diff of changes in a worktree compared to HEAD
-pub async fn get_diff(_original: &Path, worktree: &Path) -> Result<String> {
-    let output = Command::new("git")
-        .args(["diff", "HEAD"])
-        .current_dir(worktree)
-        .output()
-        .await?;
-
-    // git diff returns 1 if there are differences, 0 if none
-    // It's not an error, just means there are changes
-    let diff = String::from_utf8_lossy(&output.stdout).to_string();
-    Ok(diff)
-}
-
 /// Apply changes from a worktree to the target directory using rsync-like copy
 ///
 /// This copies all files from the worktree to the target, excluding .git

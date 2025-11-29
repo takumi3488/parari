@@ -230,18 +230,6 @@ fn display_results_summary(result_infos: &[ResultInfo]) {
                 println!("    - {} deleted", summary.files_deleted);
             }
         }
-
-        if let Some(ref diff) = info.diff
-            && !diff.is_empty()
-        {
-            println!("\n    Diff preview:");
-            for line in diff.lines().take(10) {
-                println!("    {}", line);
-            }
-            if diff.lines().count() > 10 {
-                println!("    ... (use 'View diff' for full output)");
-            }
-        }
     }
 
     println!("\n{}", "=".repeat(50));
@@ -274,15 +262,6 @@ pub fn show_running_message(executor_names: &[&str]) {
         println!("  - {}", name);
     }
     println!("\nThis may take a while...\n");
-}
-
-/// Display diff tool information at startup
-pub fn show_diff_tool_info() {
-    if is_delta_available() {
-        println!("📊 Diff tool: delta (enhanced diff viewer)");
-    } else {
-        println!("📊 Diff tool: git diff (install 'delta' for better output)");
-    }
 }
 
 /// Wait for Enter or Esc key press

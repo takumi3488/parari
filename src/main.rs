@@ -76,7 +76,6 @@ async fn run() -> Result<()> {
 
     let executor_names: Vec<&str> = executors.iter().map(|e| e.name()).collect();
     cli::show_running_message(&executor_names);
-    cli::show_diff_tool_info();
 
     // Run the task
     let results = runner.run(&prompt, executors).await?;
@@ -88,10 +87,7 @@ async fn run() -> Result<()> {
     }
 
     // Prepare result info for display
-    let display_options = DisplayOptions {
-        show_diff: args.show_diff,
-        show_summary: true,
-    };
+    let display_options = DisplayOptions::default();
 
     let mut result_infos = Vec::new();
     for result in &results {

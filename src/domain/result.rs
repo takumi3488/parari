@@ -8,18 +8,13 @@ use super::task::TaskResult;
 /// Options for displaying results
 #[derive(Debug, Clone)]
 pub struct DisplayOptions {
-    /// Show full diff
-    pub show_diff: bool,
     /// Show change summary
     pub show_summary: bool,
 }
 
 impl Default for DisplayOptions {
     fn default() -> Self {
-        Self {
-            show_diff: false,
-            show_summary: true,
-        }
+        Self { show_summary: true }
     }
 }
 
@@ -32,8 +27,6 @@ pub struct ResultInfo {
     pub success: bool,
     /// Number of files changed
     pub files_changed: usize,
-    /// The diff output (if requested)
-    pub diff: Option<String>,
     /// The change summary
     pub change_summary: Option<git::ChangeSummary>,
     /// Path to the worktree
@@ -43,15 +36,9 @@ pub struct ResultInfo {
 /// Prepare result information for display
 pub async fn prepare_result_info(
     result: &TaskResult,
-    original_path: &Path,
-    options: &DisplayOptions,
+    _original_path: &Path,
+    _options: &DisplayOptions,
 ) -> Result<ResultInfo> {
-    let diff = if options.show_diff {
-        Some(git::get_diff(original_path, &result.worktree_path).await?)
-    } else {
-        None
-    };
-
     let files_changed = result
         .change_summary
         .as_ref()
@@ -62,7 +49,6 @@ pub async fn prepare_result_info(
         executor_name: result.execution.executor_name.clone(),
         success: result.execution.success,
         files_changed,
-        diff,
         change_summary: result.change_summary.clone(),
         worktree_path: result.worktree_path.clone(),
     })
@@ -127,7 +113,6 @@ mod tests {
     #[test]
     fn test_display_options_default() {
         let opts = DisplayOptions::default();
-        assert!(!opts.show_diff);
         assert!(opts.show_summary);
     }
 }
