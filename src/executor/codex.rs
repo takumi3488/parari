@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use async_trait::async_trait;
 use tokio::process::Command;
 
 use super::traits::{ExecutionResult, Executor};
@@ -15,6 +16,7 @@ impl CodexExecutor {
     }
 }
 
+#[async_trait]
 impl Executor for CodexExecutor {
     fn name(&self) -> &str {
         "codex"

@@ -18,6 +18,27 @@ pub enum Error {
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("Git command failed: {message}")]
+    GitCommand { message: String },
+
+    #[error("Not a git repository: {path}")]
+    NotGitRepository { path: PathBuf },
+
+    #[error("Worktree already exists: {path}")]
+    WorktreeAlreadyExists { path: PathBuf },
+
+    #[error("Worktree not found: {path}")]
+    WorktreeNotFound { path: PathBuf },
+
+    #[error("Merge conflict occurred")]
+    MergeConflict,
+
+    #[error("No executors available")]
+    NoExecutorsAvailable,
+
+    #[error("User cancelled the operation")]
+    UserCancelled,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

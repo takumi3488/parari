@@ -4,5 +4,9 @@
 //! CLI tools in parallel, each in their own git worktree, allowing users to compare
 //! results and choose the best one.
 
+pub mod cli;
+pub mod config;
+pub mod domain;
 pub mod error;
 pub mod executor;
+pub mod git;

@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use async_trait::async_trait;
+
 use crate::error::Result;
 
 /// Result of executing an AI CLI tool
@@ -49,12 +51,13 @@ impl ExecutionResult {
 ///
 /// This trait abstracts the execution of AI CLI tools (claude, gemini, codex)
 /// to allow for mocking in tests.
+#[async_trait]
 pub trait Executor: Send + Sync {
     /// Returns the name of the executor (e.g., "claude", "gemini", "codex")
     fn name(&self) -> &str;
 
     /// Check if the executor is available in PATH
-    fn is_available(&self) -> impl Future<Output = bool> + Send;
+    async fn is_available(&self) -> bool;
 
     /// Execute the CLI tool with the given prompt in the specified working directory
     ///
@@ -65,11 +68,5 @@ pub trait Executor: Send + Sync {
     /// # Returns
     /// * `Ok(ExecutionResult)` - The result of the execution
     /// * `Err(Error)` - If the execution could not be started
-    fn execute(
-        &self,
-        prompt: &str,
-        working_dir: &Path,
-    ) -> impl Future<Output = Result<ExecutionResult>> + Send;
+    async fn execute(&self, prompt: &str, working_dir: &Path) -> Result<ExecutionResult>;
 }
-
-use std::future::Future;
