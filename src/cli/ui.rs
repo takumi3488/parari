@@ -1,12 +1,38 @@
+use std::io::{self, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use crossterm::event::{self, Event, KeyCode};
+use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::terminal;
 use inquire::Select;
 
 use crate::domain::{ResultInfo, TaskResult};
 use crate::error::{Error, Result};
+
+/// Mode for detail view when a model is selected
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum DetailMode {
+    Output,
+    Diff,
+}
+
+impl DetailMode {
+    /// Cycle to the next mode (Tab key)
+    fn next(self) -> Self {
+        match self {
+            DetailMode::Output => DetailMode::Diff,
+            DetailMode::Diff => DetailMode::Output,
+        }
+    }
+
+    /// Get display name for the mode
+    fn name(self) -> &'static str {
+        match self {
+            DetailMode::Output => "Output",
+            DetailMode::Diff => "Diff",
+        }
+    }
+}
 
 /// Check if delta command is available
 pub fn is_delta_available() -> bool {
@@ -121,7 +147,12 @@ pub fn show_diff_with_delta(worktree_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Display results and allow user to select one
+/// Display results and allow user to select one with a two-stage UI
+///
+/// Stage 1: Select a model (claude, gemini, codex)
+/// Stage 2: View details with Tab to switch modes (Output -> Diff -> Apply)
+///          - Esc returns to Stage 1
+///          - Enter in Apply mode applies the changes
 pub fn select_result(results: &[TaskResult], result_infos: &[ResultInfo]) -> Result<usize> {
     if results.is_empty() {
         return Err(Error::NoExecutorsAvailable);
@@ -130,92 +161,145 @@ pub fn select_result(results: &[TaskResult], result_infos: &[ResultInfo]) -> Res
     loop {
         display_results_summary(result_infos);
 
-        // Build options: apply options + view diff options + view output options
-        let mut options: Vec<String> = Vec::new();
+        // Stage 1: Build model selection options
+        let options: Vec<String> = result_infos
+            .iter()
+            .enumerate()
+            .map(|(i, info)| {
+                let status = if info.success { "✓" } else { "✗" };
+                let changes = format!("{} files", info.files_changed);
+                format!(
+                    "[{}] {} {} ({})",
+                    i + 1,
+                    status,
+                    info.executor_name,
+                    changes
+                )
+            })
+            .collect();
 
-        // Apply options
-        for (i, info) in result_infos.iter().enumerate() {
-            let status = if info.success { "✓" } else { "✗" };
-            let changes = format!("{} files changed", info.files_changed);
-            options.push(format!(
-                "Apply: {} {} - {} ({})",
-                i + 1,
-                status,
-                info.executor_name,
-                changes
-            ));
-        }
-
-        // View diff options
-        for (i, info) in result_infos.iter().enumerate() {
-            options.push(format!("View diff: [{}] {}", i + 1, info.executor_name));
-        }
-
-        // View output options
-        for (i, info) in result_infos.iter().enumerate() {
-            options.push(format!("View output: [{}] {}", i + 1, info.executor_name));
-        }
-
-        let selection = Select::new("Select an action:", options)
-            .with_help_message(
-                "Use arrow keys to navigate, Enter to select, Esc to cancel. View diff uses delta if available.",
-            )
+        let selection = Select::new("Select a model:", options)
+            .with_help_message("Use arrow keys to navigate, Enter to select, Esc to cancel")
             .prompt();
 
         match selection {
             Ok(selected) => {
-                if selected.starts_with("Apply:") {
-                    // Extract the index from the selected string
-                    let index = selected
-                        .strip_prefix("Apply: ")
-                        .and_then(|s| s.split_whitespace().next())
-                        .and_then(|s| s.parse::<usize>().ok())
-                        .map(|n| n - 1)
-                        .unwrap_or(0);
-                    return Ok(index);
-                } else if selected.starts_with("View diff:") {
-                    // Extract the index from the selected string
-                    let index = selected
-                        .strip_prefix("View diff: [")
-                        .and_then(|s| s.split(']').next())
-                        .and_then(|s| s.parse::<usize>().ok())
-                        .map(|n| n - 1)
-                        .unwrap_or(0);
+                // Extract the index from the selected string
+                let index = selected
+                    .strip_prefix('[')
+                    .and_then(|s| s.split(']').next())
+                    .and_then(|s| s.parse::<usize>().ok())
+                    .map(|n| n - 1)
+                    .unwrap_or(0);
 
-                    if let Some(info) = result_infos.get(index) {
-                        println!(
-                            "\n{} Showing diff for {} {}",
-                            "=".repeat(20),
-                            info.executor_name.to_uppercase(),
-                            "=".repeat(20)
-                        );
-                        if let Err(e) = show_diff_with_delta(&info.worktree_path) {
-                            eprintln!("Error showing diff: {}", e);
-                        }
-                        println!("\nPress Enter or Esc to go back...");
-                        wait_for_key_press();
+                if let Some(info) = result_infos.get(index) {
+                    // Stage 2: Show detail view with mode switching
+                    match show_detail_view(info) {
+                        DetailViewResult::Apply => return Ok(index),
+                        DetailViewResult::Back => continue, // Return to model selector
+                        DetailViewResult::Cancel => return Err(Error::UserCancelled),
                     }
-                    // Loop continues to show the menu again
-                } else if selected.starts_with("View output:") {
-                    // Extract the index from the selected string
-                    let index = selected
-                        .strip_prefix("View output: [")
-                        .and_then(|s| s.split(']').next())
-                        .and_then(|s| s.parse::<usize>().ok())
-                        .map(|n| n - 1)
-                        .unwrap_or(0);
-
-                    if let Some(info) = result_infos.get(index) {
-                        show_executor_output(info);
-                        println!("\nPress Enter or Esc to go back...");
-                        wait_for_key_press();
-                    }
-                    // Loop continues to show the menu again
                 }
             }
             Err(_) => return Err(Error::UserCancelled),
         }
     }
+}
+
+/// Result from the detail view
+enum DetailViewResult {
+    Apply,  // User chose to apply this result
+    Back,   // User pressed Esc, go back to model selector
+    Cancel, // User wants to cancel entirely
+}
+
+/// Show detail view for a selected model with Tab mode switching
+fn show_detail_view(info: &ResultInfo) -> DetailViewResult {
+    let mut mode = DetailMode::Output;
+
+    loop {
+        // Clear screen and show current mode
+        clear_screen();
+        print_mode_tabs(mode);
+        println!(
+            "\n{} {} {}",
+            "=".repeat(20),
+            info.executor_name.to_uppercase(),
+            "=".repeat(20)
+        );
+
+        // Show content based on current mode
+        match mode {
+            DetailMode::Output => {
+                show_executor_output(info);
+            }
+            DetailMode::Diff => {
+                if let Err(e) = show_diff_with_delta(&info.worktree_path) {
+                    eprintln!("Error showing diff: {}", e);
+                }
+            }
+        }
+
+        // Show help message
+        println!();
+        println!(
+            "Press [Tab] for {}, [Shift+Enter] to apply, [Esc] to go back",
+            mode.next().name()
+        );
+
+        // Handle key input
+        if terminal::enable_raw_mode().is_err() {
+            return DetailViewResult::Cancel;
+        }
+
+        let result = loop {
+            if let Ok(Event::Key(key_event)) = event::read() {
+                match key_event.code {
+                    KeyCode::Tab => {
+                        mode = mode.next();
+                        break None; // Redraw with new mode
+                    }
+                    KeyCode::Enter if key_event.modifiers.contains(KeyModifiers::SHIFT) => {
+                        break Some(DetailViewResult::Apply);
+                    }
+                    KeyCode::Esc => {
+                        break Some(DetailViewResult::Back);
+                    }
+                    _ => continue,
+                }
+            }
+        };
+
+        let _ = terminal::disable_raw_mode();
+
+        if let Some(r) = result {
+            return r;
+        }
+    }
+}
+
+/// Clear the screen
+fn clear_screen() {
+    // Use ANSI escape codes to clear screen
+    print!("\x1B[2J\x1B[H");
+    let _ = io::stdout().flush();
+}
+
+/// Print mode tabs showing current selection
+fn print_mode_tabs(current: DetailMode) {
+    let modes = [DetailMode::Output, DetailMode::Diff];
+    let tabs: Vec<String> = modes
+        .iter()
+        .map(|&m| {
+            if m == current {
+                format!("[{}]", m.name())
+            } else {
+                format!(" {} ", m.name())
+            }
+        })
+        .collect();
+
+    println!("{}", tabs.join("  "));
 }
 
 /// Display a summary of all results
@@ -300,26 +384,6 @@ pub fn show_running_message(executor_names: &[&str]) {
         println!("  - {}", name);
     }
     println!("\nThis may take a while...\n");
-}
-
-/// Wait for Enter or Esc key press
-fn wait_for_key_press() {
-    if terminal::enable_raw_mode().is_err() {
-        // Fallback to stdin if raw mode fails
-        let _ = std::io::stdin().read_line(&mut String::new());
-        return;
-    }
-
-    loop {
-        if let Ok(Event::Key(key_event)) = event::read() {
-            match key_event.code {
-                KeyCode::Enter | KeyCode::Esc => break,
-                _ => continue,
-            }
-        }
-    }
-
-    let _ = terminal::disable_raw_mode();
 }
 
 #[cfg(test)]
