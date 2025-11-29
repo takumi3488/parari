@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use parari::cli::{Args, ExecutorFilter};
-use parari::domain::{self, DisplayOptions, TaskRunner};
+use parari::domain::{self, DisplayOptions, TaskRunner, cleanup_all_registered_worktrees};
 use parari::error::{Error, Result};
 use parari::executor::claude::ClaudeExecutor;
 use parari::executor::codex::CodexExecutor;
@@ -12,9 +12,29 @@ use parari::{cli, git};
 
 #[tokio::main]
 async fn main() {
-    if let Err(e) = run().await {
-        cli::show_error(&e);
-        std::process::exit(1);
+    // Run the main task with signal handling
+    let result = tokio::select! {
+        result = run() => result,
+        _ = tokio::signal::ctrl_c() => {
+            eprintln!("\nReceived interrupt signal, cleaning up worktrees...");
+            cleanup_all_registered_worktrees();
+            std::process::exit(130); // Standard exit code for SIGINT
+        }
+    };
+
+    // Cleanup any remaining worktrees on normal exit
+    cleanup_all_registered_worktrees();
+
+    if let Err(e) = result {
+        match e {
+            Error::UserCancelled => {
+                eprintln!("Cancelled.");
+            }
+            _ => {
+                cli::show_error(&e);
+                std::process::exit(1);
+            }
+        }
     }
 }
 
