@@ -115,9 +115,13 @@ impl TaskRunner {
                                     .await
                                     .ok();
 
-                            // Update progress: Completed
+                            // Update progress based on execution success
                             if let Some(ref p) = progress {
-                                p.update_status(&executor_name, AgentStatus::Completed);
+                                if execution.success {
+                                    p.update_status(&executor_name, AgentStatus::Completed);
+                                } else {
+                                    p.update_status(&executor_name, AgentStatus::Failed);
+                                }
                             }
 
                             Some(TaskResult {

@@ -79,8 +79,8 @@ impl ProgressTracker {
             let pb = multi_progress.add(ProgressBar::new_spinner());
             pb.set_style(spinner_style.clone());
 
-            // Set initial message with agent emoji
-            let prefix = format!("{} {}", agent_style.emoji, name);
+            // Set initial message with agent emoji (pad name to 6 chars for alignment)
+            let prefix = format!("{} {:<6}", agent_style.emoji, name);
             pb.set_prefix(prefix);
             pb.set_message(format!("{} Waiting...", AgentStatus::Pending.emoji()));
             pb.enable_steady_tick(Duration::from_millis(100));
