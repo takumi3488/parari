@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use parari::cli::Args;
+use parari::cli::progress::{ProgressTracker, display_completion_summary, display_header};
 use parari::domain::{self, DisplayOptions, TaskRunner, cleanup_all_registered_worktrees};
 use parari::error::{Error, Result};
 #[cfg(not(feature = "mock"))]
@@ -74,11 +75,34 @@ async fn run() -> Result<()> {
         return Err(Error::NoExecutorsAvailable);
     }
 
-    let executor_names: Vec<&str> = executors.iter().map(|e| e.name()).collect();
-    cli::show_running_message(&executor_names);
+    // Collect executor names before moving executors
+    let executor_names: Vec<String> = executors.iter().map(|e| e.name().to_string()).collect();
+    let executor_name_refs: Vec<&str> = executor_names.iter().map(|s| s.as_str()).collect();
 
-    // Run the task
-    let results = runner.run(&prompt, executors).await?;
+    // Display header with agent info
+    display_header(&executor_name_refs);
+
+    // Create progress tracker
+    let progress = Arc::new(ProgressTracker::new(&executor_name_refs));
+
+    // Run the task with progress tracking
+    let results = runner
+        .run_with_progress(&prompt, executors, Some(progress))
+        .await?;
+
+    // Collect completed and failed agents for summary
+    let completed: Vec<&str> = results
+        .iter()
+        .map(|r| r.execution.executor_name.as_str())
+        .collect();
+    let failed: Vec<&str> = executor_names
+        .iter()
+        .map(|s| s.as_str())
+        .filter(|name| !completed.iter().any(|c| c == name))
+        .collect();
+
+    // Display completion summary
+    display_completion_summary(&completed, &failed);
 
     if results.is_empty() {
         cli::show_progress("No results were produced.");
