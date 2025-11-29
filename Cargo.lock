@@ -580,6 +580,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "clap",
+ "crossterm",
  "dirs",
  "futures",
  "inquire",

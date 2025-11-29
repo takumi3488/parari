@@ -26,6 +26,10 @@ This is similar to [Cursor's worktree feature](https://cursor.com/en-US/docs/con
   - `gemini` (Gemini CLI)
   - `codex` (Codex CLI)
 
+### Recommended
+
+- [delta](https://dandavison.github.io/delta/) - A syntax-highlighting pager for git diff output. Makes comparing worktree changes much easier to read.
+
 ## Installation
 
 ```bash

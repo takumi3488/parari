@@ -76,6 +76,7 @@ async fn run() -> Result<()> {
 
     let executor_names: Vec<&str> = executors.iter().map(|e| e.name()).collect();
     cli::show_running_message(&executor_names);
+    cli::show_diff_tool_info();
 
     // Run the task
     let results = runner.run(&prompt, executors).await?;
