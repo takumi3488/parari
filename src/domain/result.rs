@@ -31,6 +31,10 @@ pub struct ResultInfo {
     pub change_summary: Option<git::ChangeSummary>,
     /// Path to the worktree
     pub worktree_path: std::path::PathBuf,
+    /// Standard output from the executor
+    pub stdout: String,
+    /// Standard error from the executor
+    pub stderr: String,
 }
 
 /// Prepare result information for display
@@ -51,6 +55,8 @@ pub async fn prepare_result_info(
         files_changed,
         change_summary: result.change_summary.clone(),
         worktree_path: result.worktree_path.clone(),
+        stdout: result.execution.stdout.clone(),
+        stderr: result.execution.stderr.clone(),
     })
 }
 

@@ -130,7 +130,7 @@ pub fn select_result(results: &[TaskResult], result_infos: &[ResultInfo]) -> Res
     loop {
         display_results_summary(result_infos);
 
-        // Build options: apply options + view diff options
+        // Build options: apply options + view diff options + view output options
         let mut options: Vec<String> = Vec::new();
 
         // Apply options
@@ -149,6 +149,11 @@ pub fn select_result(results: &[TaskResult], result_infos: &[ResultInfo]) -> Res
         // View diff options
         for (i, info) in result_infos.iter().enumerate() {
             options.push(format!("View diff: [{}] {}", i + 1, info.executor_name));
+        }
+
+        // View output options
+        for (i, info) in result_infos.iter().enumerate() {
+            options.push(format!("View output: [{}] {}", i + 1, info.executor_name));
         }
 
         let selection = Select::new("Select an action:", options)
@@ -191,6 +196,21 @@ pub fn select_result(results: &[TaskResult], result_infos: &[ResultInfo]) -> Res
                         wait_for_key_press();
                     }
                     // Loop continues to show the menu again
+                } else if selected.starts_with("View output:") {
+                    // Extract the index from the selected string
+                    let index = selected
+                        .strip_prefix("View output: [")
+                        .and_then(|s| s.split(']').next())
+                        .and_then(|s| s.parse::<usize>().ok())
+                        .map(|n| n - 1)
+                        .unwrap_or(0);
+
+                    if let Some(info) = result_infos.get(index) {
+                        show_executor_output(info);
+                        println!("\nPress Enter or Esc to go back...");
+                        wait_for_key_press();
+                    }
+                    // Loop continues to show the menu again
                 }
             }
             Err(_) => return Err(Error::UserCancelled),
@@ -228,6 +248,29 @@ fn display_results_summary(result_infos: &[ResultInfo]) {
     }
 
     println!("\n{}", "=".repeat(50));
+}
+
+/// Display the stdout and stderr output from an executor
+fn show_executor_output(info: &ResultInfo) {
+    println!(
+        "\n{} Output from {} {}",
+        "=".repeat(20),
+        info.executor_name.to_uppercase(),
+        "=".repeat(20)
+    );
+
+    if !info.stdout.is_empty() {
+        println!("\n--- STDOUT ---");
+        println!("{}", info.stdout);
+    } else {
+        println!("\n--- STDOUT ---");
+        println!("(no output)");
+    }
+
+    if !info.stderr.is_empty() {
+        println!("\n--- STDERR ---");
+        println!("{}", info.stderr);
+    }
 }
 
 /// Display a message when applying changes
