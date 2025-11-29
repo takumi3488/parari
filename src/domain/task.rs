@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use futures::future::join_all;
 
+use crate::cli::progress::{AgentStatus, ProgressTracker};
 use crate::error::{Error, Result};
 use crate::executor::traits::{ExecutionResult, Executor};
 use crate::git;
@@ -51,6 +52,18 @@ impl TaskRunner {
         prompt: &str,
         executors: Vec<Arc<dyn Executor>>,
     ) -> Result<Vec<TaskResult>> {
+        self.run_with_progress(prompt, executors, None).await
+    }
+
+    /// Run the task with the given executors in parallel with progress tracking
+    ///
+    /// Returns results from all executors that completed successfully
+    pub async fn run_with_progress(
+        &mut self,
+        prompt: &str,
+        executors: Vec<Arc<dyn Executor>>,
+        progress: Option<Arc<ProgressTracker>>,
+    ) -> Result<Vec<TaskResult>> {
         // Filter to available executors
         let mut available_executors = Vec::new();
         for executor in executors {
@@ -82,8 +95,16 @@ impl TaskRunner {
                     .clone();
                 let prompt = prompt.to_string();
                 let repo_path = repo_path.clone();
+                let progress = progress.clone();
 
                 async move {
+                    let executor_name = executor.name().to_string();
+
+                    // Update progress: Running
+                    if let Some(ref p) = progress {
+                        p.update_status(&executor_name, AgentStatus::Running);
+                    }
+
                     let result = executor.execute(&prompt, &worktree.path).await;
 
                     match result {
@@ -94,19 +115,39 @@ impl TaskRunner {
                                     .await
                                     .ok();
 
+                            // Update progress based on execution success
+                            if let Some(ref p) = progress {
+                                if execution.success {
+                                    p.update_status(&executor_name, AgentStatus::Completed);
+                                } else {
+                                    p.update_status(&executor_name, AgentStatus::Failed);
+                                }
+                            }
+
                             Some(TaskResult {
                                 execution,
                                 worktree_path: worktree.path,
                                 change_summary,
                             })
                         }
-                        Err(_) => None,
+                        Err(_) => {
+                            // Update progress: Failed
+                            if let Some(ref p) = progress {
+                                p.update_status(&executor_name, AgentStatus::Failed);
+                            }
+                            None
+                        }
                     }
                 }
             })
             .collect();
 
         let results: Vec<_> = join_all(futures).await.into_iter().flatten().collect();
+
+        // Finish all progress bars
+        if let Some(ref p) = progress {
+            p.finish_all();
+        }
 
         Ok(results)
     }
