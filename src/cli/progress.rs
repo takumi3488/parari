@@ -14,7 +14,7 @@ pub struct AgentStyle {
 }
 
 impl AgentStyle {
-    fn for_agent(name: &str) -> Self {
+    pub fn for_agent(name: &str) -> Self {
         match name.to_lowercase().as_str() {
             "claude" => AgentStyle {
                 emoji: "🤖",

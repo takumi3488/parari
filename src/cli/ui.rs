@@ -2,10 +2,12 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+use console::style;
 use crossterm::event::{self, Event, KeyCode};
 use crossterm::terminal;
 use inquire::Select;
 
+use crate::cli::progress::AgentStyle;
 use crate::domain::{ResultInfo, TaskResult};
 use crate::error::{Error, Result};
 
@@ -216,17 +218,30 @@ enum DetailViewResult {
 /// Show detail view for a selected model with Tab mode switching
 fn show_detail_view(info: &ResultInfo) -> DetailViewResult {
     let mut mode = DetailMode::Output;
+    let agent_style = AgentStyle::for_agent(&info.executor_name);
 
     loop {
         // Clear screen and show current mode
         clear_screen();
-        print_mode_tabs(mode);
+
+        // Header
+        println!();
+        println!("{}", style("━".repeat(50)).cyan());
         println!(
-            "\n{} {} {}",
-            "=".repeat(20),
-            info.executor_name.to_uppercase(),
-            "=".repeat(20)
+            "  {} {} {}",
+            agent_style.emoji,
+            style(info.executor_name.to_uppercase()).bold().cyan(),
+            if info.success {
+                style("✅ Success").green()
+            } else {
+                style("❌ Failed").red()
+            }
         );
+        println!("{}", style("━".repeat(50)).cyan());
+        println!();
+
+        // Mode tabs
+        print_mode_tabs(mode);
 
         // Show content based on current mode
         match mode {
@@ -235,16 +250,27 @@ fn show_detail_view(info: &ResultInfo) -> DetailViewResult {
             }
             DetailMode::Diff => {
                 if let Err(e) = show_diff_with_delta(&info.worktree_path) {
-                    eprintln!("Error showing diff: {}", e);
+                    eprintln!(
+                        "  {} {} {}",
+                        style("❌").bold(),
+                        style("Error showing diff:").red(),
+                        e
+                    );
                 }
             }
         }
 
         // Show help message
         println!();
+        println!("{}", style("─".repeat(50)).dim());
         println!(
-            "Press [Tab] for {}, [a] to apply, [Esc] to go back",
-            mode.next().name()
+            "  {} {} {} {} {} {}",
+            style("[Tab]").bold().cyan(),
+            style(format!("→ {}", mode.next().name())).dim(),
+            style("[a]").bold().green(),
+            style("→ Apply").dim(),
+            style("[Esc]").bold().yellow(),
+            style("→ Back").dim()
         );
 
         // Handle key input
@@ -287,94 +313,184 @@ fn clear_screen() {
 
 /// Print mode tabs showing current selection
 fn print_mode_tabs(current: DetailMode) {
-    let modes = [DetailMode::Output, DetailMode::Diff];
+    let modes = [(DetailMode::Output, "📤"), (DetailMode::Diff, "📝")];
+
     let tabs: Vec<String> = modes
         .iter()
-        .map(|&m| {
-            if m == current {
-                format!("[{}]", m.name())
+        .map(|(m, emoji)| {
+            if *m == current {
+                format!(
+                    "{}",
+                    style(format!(" {} {} ", emoji, m.name()))
+                        .bold()
+                        .on_cyan()
+                        .black()
+                )
             } else {
-                format!(" {} ", m.name())
+                format!("{}", style(format!(" {} {} ", emoji, m.name())).dim())
             }
         })
         .collect();
 
-    println!("{}", tabs.join("  "));
+    println!("  {}", tabs.join(" "));
 }
 
 /// Display a summary of all results
 fn display_results_summary(result_infos: &[ResultInfo]) {
-    println!("\n{}", "=".repeat(50));
-    println!("Results:");
-    println!("{}", "=".repeat(50));
+    println!();
+    println!("{}", style("━".repeat(50)).cyan());
+    println!(
+        "  {} {}",
+        style("📊").bold(),
+        style("Results Summary").bold().cyan()
+    );
+    println!("{}", style("━".repeat(50)).cyan());
 
     for (i, info) in result_infos.iter().enumerate() {
-        let status = if info.success { "✓" } else { "✗" };
+        let agent_style = AgentStyle::for_agent(&info.executor_name);
+        let (status_emoji, status_style) = if info.success {
+            ("✅", style("Success").green())
+        } else {
+            ("❌", style("Failed").red())
+        };
+
+        println!();
         println!(
-            "\n[{}] {} {}",
-            i + 1,
-            status,
-            info.executor_name.to_uppercase()
+            "  {} {} {} {}",
+            style(format!("[{}]", i + 1)).bold().white(),
+            agent_style.emoji,
+            style(&info.executor_name.to_uppercase()).bold(),
+            status_emoji
         );
-        println!("    Files changed: {}", info.files_changed);
+        println!(
+            "     {} {} files changed",
+            style("📁").dim(),
+            style(info.files_changed).yellow()
+        );
 
         if let Some(ref summary) = info.change_summary {
             if summary.files_added > 0 {
-                println!("    + {} added", summary.files_added);
+                println!(
+                    "     {} {} added",
+                    style("+").green().bold(),
+                    style(summary.files_added).green()
+                );
             }
             if summary.files_modified > 0 {
-                println!("    ~ {} modified", summary.files_modified);
+                println!(
+                    "     {} {} modified",
+                    style("~").yellow().bold(),
+                    style(summary.files_modified).yellow()
+                );
             }
             if summary.files_deleted > 0 {
-                println!("    - {} deleted", summary.files_deleted);
+                println!(
+                    "     {} {} deleted",
+                    style("-").red().bold(),
+                    style(summary.files_deleted).red()
+                );
             }
         }
+        println!("     {}", status_style);
     }
 
-    println!("\n{}", "=".repeat(50));
+    println!();
+    println!("{}", style("━".repeat(50)).cyan());
 }
 
 /// Display the stdout and stderr output from an executor
 fn show_executor_output(info: &ResultInfo) {
+    let agent_style = AgentStyle::for_agent(&info.executor_name);
+
+    println!();
+    println!("{}", style("━".repeat(50)).dim());
     println!(
-        "\n{} Output from {} {}",
-        "=".repeat(20),
-        info.executor_name.to_uppercase(),
-        "=".repeat(20)
+        "  {} {} {}",
+        style("📤").bold(),
+        agent_style.emoji,
+        style(format!("Output from {}", info.executor_name.to_uppercase()))
+            .bold()
+            .cyan()
     );
+    println!("{}", style("━".repeat(50)).dim());
 
     if !info.stdout.is_empty() {
-        println!("\n--- STDOUT ---");
-        println!("{}", info.stdout);
+        println!();
+        println!(
+            "  {} {}",
+            style("📝").bold(),
+            style("STDOUT").green().bold()
+        );
+        println!("  {}", style("─".repeat(40)).dim());
+        for line in info.stdout.lines() {
+            println!("  {}", line);
+        }
     } else {
-        println!("\n--- STDOUT ---");
-        println!("(no output)");
+        println!();
+        println!(
+            "  {} {}",
+            style("📝").bold(),
+            style("STDOUT").green().bold()
+        );
+        println!("  {}", style("(no output)").dim());
     }
 
     if !info.stderr.is_empty() {
-        println!("\n--- STDERR ---");
-        println!("{}", info.stderr);
+        println!();
+        println!(
+            "  {} {}",
+            style("⚠️").bold(),
+            style("STDERR").yellow().bold()
+        );
+        println!("  {}", style("─".repeat(40)).dim());
+        for line in info.stderr.lines() {
+            println!("  {}", style(line).dim());
+        }
     }
 }
 
 /// Display a message when applying changes
 pub fn show_applying_message(executor_name: &str) {
-    println!("\nApplying changes from {}...", executor_name);
+    let agent_style = AgentStyle::for_agent(executor_name);
+    println!();
+    println!(
+        "  {} {} Applying changes from {}...",
+        style("🔧").bold(),
+        agent_style.emoji,
+        style(executor_name.to_uppercase()).bold().cyan()
+    );
 }
 
 /// Display a success message
 pub fn show_success_message() {
-    println!("Changes applied successfully!");
+    println!();
+    println!("{}", style("━".repeat(50)).green());
+    println!(
+        "  {} {}",
+        style("✅").bold(),
+        style("Changes applied successfully!").bold().green()
+    );
+    println!("{}", style("━".repeat(50)).green());
+    println!();
 }
 
 /// Display an error message
 pub fn show_error(error: &Error) {
-    eprintln!("Error: {}", error);
+    eprintln!();
+    eprintln!("{}", style("━".repeat(50)).red());
+    eprintln!(
+        "  {} {} {}",
+        style("❌").bold(),
+        style("Error:").bold().red(),
+        style(error).red()
+    );
+    eprintln!("{}", style("━".repeat(50)).red());
+    eprintln!();
 }
 
 /// Display progress message
 pub fn show_progress(message: &str) {
-    println!("{}", message);
+    println!("  {} {}", style("ℹ️").bold(), style(message).cyan());
 }
 
 /// Display waiting message while executors are running
