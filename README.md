@@ -1,8 +1,5 @@
 # parari
 
-> **Warning**
-> This project is currently under development and is not yet functional.
-
 A CLI tool that runs multiple AI coding agents in parallel using git worktrees.
 
 ## Overview
@@ -27,6 +24,13 @@ This is similar to [Cursor's worktree feature](https://cursor.com/en-US/docs/con
 - Choose and merge the best solution
 
 ## Requirements
+
+### Supported Platforms
+
+- macOS
+- Linux
+
+### Dependencies
 
 - Git with worktree support
 - One or more of the following CLI tools in your PATH:
