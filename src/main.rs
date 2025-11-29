@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use parari::cli::{Args, ExecutorFilter};
+use parari::cli::Args;
 use parari::domain::{self, DisplayOptions, TaskRunner, cleanup_all_registered_worktrees};
 use parari::error::{Error, Result};
 #[cfg(not(feature = "mock"))]
@@ -67,8 +67,8 @@ async fn run() -> Result<()> {
     // Create task runner
     let mut runner = TaskRunner::new(&working_dir).await?;
 
-    // Collect available executors based on filter
-    let executors = get_executors(&args.get_executor_filter()).await;
+    // Collect available executors
+    let executors = get_executors().await;
 
     if executors.is_empty() {
         return Err(Error::NoExecutorsAvailable);
@@ -96,16 +96,7 @@ async fn run() -> Result<()> {
     }
 
     // Handle selection
-    let selected_index = if args.no_select {
-        cli::show_progress("Skipping result selection (--no-select)");
-        runner.cleanup().await?;
-        return Ok(());
-    } else if args.auto_select {
-        let ranked = domain::rank_results(&results);
-        ranked.first().copied().unwrap_or(0)
-    } else {
-        cli::select_result(&results, &result_infos)?
-    };
+    let selected_index = cli::select_result(&results, &result_infos)?;
 
     // Apply the selected result
     let selected_result = &results[selected_index];
@@ -121,91 +112,45 @@ async fn run() -> Result<()> {
     Ok(())
 }
 
-/// Get executors based on filter (mock version for development/testing)
+/// Get all available executors (mock version for development/testing)
 #[cfg(feature = "mock")]
-async fn get_executors(filter: &ExecutorFilter) -> Vec<Arc<dyn Executor>> {
+async fn get_executors() -> Vec<Arc<dyn Executor>> {
     eprintln!("[MOCK MODE] Using mock executors for development");
 
-    let mut executors: Vec<Arc<dyn Executor>> = Vec::new();
-
-    match filter {
-        ExecutorFilter::All => {
-            executors.push(Arc::new(MockExecutor::new("mock-claude").with_file(
-                "mock-claude-output.txt",
-                "This is mock output from Claude",
-            )));
-            executors.push(Arc::new(MockExecutor::new("mock-gemini").with_file(
-                "mock-gemini-output.txt",
-                "This is mock output from Gemini",
-            )));
-            executors.push(Arc::new(
-                MockExecutor::new("mock-codex")
-                    .with_file("mock-codex-output.txt", "This is mock output from Codex"),
-            ));
-        }
-        ExecutorFilter::ClaudeOnly => {
-            executors.push(Arc::new(MockExecutor::new("mock-claude").with_file(
-                "mock-claude-output.txt",
-                "This is mock output from Claude",
-            )));
-        }
-        ExecutorFilter::GeminiOnly => {
-            executors.push(Arc::new(MockExecutor::new("mock-gemini").with_file(
-                "mock-gemini-output.txt",
-                "This is mock output from Gemini",
-            )));
-        }
-        ExecutorFilter::CodexOnly => {
-            executors.push(Arc::new(
-                MockExecutor::new("mock-codex")
-                    .with_file("mock-codex-output.txt", "This is mock output from Codex"),
-            ));
-        }
-    }
-
-    executors
+    vec![
+        Arc::new(
+            MockExecutor::new("mock-claude")
+                .with_file("mock-claude-output.txt", "This is mock output from Claude"),
+        ),
+        Arc::new(
+            MockExecutor::new("mock-gemini")
+                .with_file("mock-gemini-output.txt", "This is mock output from Gemini"),
+        ),
+        Arc::new(
+            MockExecutor::new("mock-codex")
+                .with_file("mock-codex-output.txt", "This is mock output from Codex"),
+        ),
+    ]
 }
 
-/// Get executors based on filter (production version)
+/// Get all available executors (production version)
 #[cfg(not(feature = "mock"))]
-async fn get_executors(filter: &ExecutorFilter) -> Vec<Arc<dyn Executor>> {
+async fn get_executors() -> Vec<Arc<dyn Executor>> {
     let mut executors: Vec<Arc<dyn Executor>> = Vec::new();
 
-    match filter {
-        ExecutorFilter::All => {
-            let claude = Arc::new(ClaudeExecutor::new());
-            if claude.is_available().await {
-                executors.push(claude);
-            }
+    let claude = Arc::new(ClaudeExecutor::new());
+    if claude.is_available().await {
+        executors.push(claude);
+    }
 
-            let gemini = Arc::new(GeminiExecutor::new());
-            if gemini.is_available().await {
-                executors.push(gemini);
-            }
+    let gemini = Arc::new(GeminiExecutor::new());
+    if gemini.is_available().await {
+        executors.push(gemini);
+    }
 
-            let codex = Arc::new(CodexExecutor::new());
-            if codex.is_available().await {
-                executors.push(codex);
-            }
-        }
-        ExecutorFilter::ClaudeOnly => {
-            let claude = Arc::new(ClaudeExecutor::new());
-            if claude.is_available().await {
-                executors.push(claude);
-            }
-        }
-        ExecutorFilter::GeminiOnly => {
-            let gemini = Arc::new(GeminiExecutor::new());
-            if gemini.is_available().await {
-                executors.push(gemini);
-            }
-        }
-        ExecutorFilter::CodexOnly => {
-            let codex = Arc::new(CodexExecutor::new());
-            if codex.is_available().await {
-                executors.push(codex);
-            }
-        }
+    let codex = Arc::new(CodexExecutor::new());
+    if codex.is_available().await {
+        executors.push(codex);
     }
 
     executors
