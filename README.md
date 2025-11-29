@@ -11,6 +11,14 @@ parari enables you to run [Claude Code](https://github.com/anthropics/claude-cod
 
 This is similar to [Cursor's worktree feature](https://cursor.com/en-US/docs/configuration/worktrees), but for the command line.
 
+## Supported Agents
+
+| Agent | Status |
+|-------|--------|
+| Claude | ✅ |
+| Gemini | ✅ |
+| Codex | 🚧 |
+
 ## Features
 
 - Run multiple AI agents in parallel on the same task
