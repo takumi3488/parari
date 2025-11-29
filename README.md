@@ -3,7 +3,7 @@
 > **Warning**
 > This project is currently under development and is not yet functional.
 
-A CLI tool that runs multiple AI coding assistants in parallel using git worktrees.
+A CLI tool that runs multiple AI coding agents in parallel using git worktrees.
 
 ## Overview
 
@@ -13,9 +13,9 @@ This is similar to [Cursor's worktree feature](https://cursor.com/en-US/docs/con
 
 ## Features
 
-- Run multiple AI assistants in parallel on the same task
+- Run multiple AI agents in parallel on the same task
 - Each assistant works in an isolated git worktree
-- Compare results from different assistants
+- Compare results from different agents
 - Choose and merge the best solution
 
 ## Requirements
@@ -39,11 +39,11 @@ cargo install parari
 ## Usage
 
 ```bash
-# Run all available assistants on a task
+# Run all available agents on a task
 parari "Fix the bug in the login function"
 
-# Run specific assistants
-parari --assistants claude,gemini "Add unit tests for the parser module"
+# Run specific agents
+parari --agents claude,gemini "Add unit tests for the parser module"
 
 # Open default editor ($EDITOR or vi) to write a prompt
 parari
