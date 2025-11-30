@@ -14,7 +14,7 @@ This is similar to [Cursor's worktree feature](https://cursor.com/en-US/docs/con
 |-------|--------|
 | Claude | ✅ |
 | Gemini | ✅ |
-| Codex | 🚧 |
+| Codex | ✅ |
 
 ## Features
 
