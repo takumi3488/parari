@@ -32,6 +32,7 @@ enum FocusedPanel {
 enum InputMode {
     Normal,
     Search,
+    Confirm,
 }
 
 /// Result from the split view selection
@@ -224,6 +225,14 @@ impl App {
         self.result = Some(SplitViewResult::Apply(self.selected_index()));
     }
 
+    fn start_confirm(&mut self) {
+        self.input_mode = InputMode::Confirm;
+    }
+
+    fn cancel_confirm(&mut self) {
+        self.input_mode = InputMode::Normal;
+    }
+
     fn cancel(&mut self) {
         self.result = Some(SplitViewResult::Cancel);
     }
@@ -235,6 +244,19 @@ impl App {
             }
 
             match self.input_mode {
+                InputMode::Confirm => {
+                    match key.code {
+                        KeyCode::Char('y') | KeyCode::Char('Y') => {
+                            self.apply();
+                            return true;
+                        }
+                        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                            self.cancel_confirm();
+                        }
+                        _ => {}
+                    }
+                    return false;
+                }
                 InputMode::Search => {
                     match key.code {
                         KeyCode::Enter => {
@@ -272,8 +294,7 @@ impl App {
 
                                 // Actions
                                 KeyCode::Char('a') | KeyCode::Enter => {
-                                    self.apply();
-                                    return true;
+                                    self.start_confirm();
                                 }
                                 KeyCode::Char('q') | KeyCode::Esc => {
                                     self.cancel();
@@ -331,8 +352,7 @@ impl App {
 
                                 // Actions (also available in detail view)
                                 KeyCode::Char('a') => {
-                                    self.apply();
-                                    return true;
+                                    self.start_confirm();
                                 }
                                 KeyCode::Char('q') | KeyCode::Esc => {
                                     self.cancel();
@@ -550,35 +570,61 @@ fn render_search_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
 }
 
 fn render_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let help_spans = match app.focused_panel {
-        FocusedPanel::Models => vec![
-            Span::styled(" j/k ", Style::new().fg(Color::Black).bg(Color::Cyan)),
-            Span::raw(" Select  "),
-            Span::styled(" Tab/l ", Style::new().fg(Color::Black).bg(Color::Cyan)),
-            Span::raw(" Details  "),
-            Span::styled(" L ", Style::new().fg(Color::Black).bg(Color::Cyan)),
-            Span::raw(" Log  "),
-            Span::styled(" D ", Style::new().fg(Color::Black).bg(Color::Cyan)),
-            Span::raw(" Diff  "),
-            Span::styled(" a/Enter ", Style::new().fg(Color::Black).bg(Color::Cyan)),
-            Span::raw(" Apply  "),
-            Span::styled(" q ", Style::new().fg(Color::Black).bg(Color::Cyan)),
-            Span::raw(" Quit"),
+    let help_spans = match app.input_mode {
+        InputMode::Confirm => {
+            let name = app
+                .selected_info()
+                .map(|info| info.executor_name.as_str())
+                .unwrap_or("unknown");
+            vec![
+                Span::styled(
+                    format!(" Apply changes from {}? ", name),
+                    Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" y ", Style::new().fg(Color::Black).bg(Color::Green)),
+                Span::raw(" Yes  "),
+                Span::styled(" n/Esc ", Style::new().fg(Color::Black).bg(Color::Red)),
+                Span::raw(" No"),
+            ]
+        }
+        InputMode::Search => vec![
+            Span::styled(" Search: ", Style::new().fg(Color::Yellow)),
+            Span::raw(&app.search_query),
+            Span::styled(" Enter ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+            Span::raw(" Execute  "),
+            Span::styled(" Esc ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+            Span::raw(" Cancel"),
         ],
-        FocusedPanel::Details => vec![
-            Span::styled(" j/k ", Style::new().fg(Color::Black).bg(Color::Cyan)),
-            Span::raw(" Scroll  "),
-            Span::styled(" g/G ", Style::new().fg(Color::Black).bg(Color::Cyan)),
-            Span::raw(" Top/Bottom  "),
-            Span::styled(" / ", Style::new().fg(Color::Black).bg(Color::Cyan)),
-            Span::raw(" Search  "),
-            Span::styled(" n/N ", Style::new().fg(Color::Black).bg(Color::Cyan)),
-            Span::raw(" Next/Prev  "),
-            Span::styled(" Tab/h ", Style::new().fg(Color::Black).bg(Color::Cyan)),
-            Span::raw(" Models  "),
-            Span::styled(" q ", Style::new().fg(Color::Black).bg(Color::Cyan)),
-            Span::raw(" Quit"),
-        ],
+        InputMode::Normal => match app.focused_panel {
+            FocusedPanel::Models => vec![
+                Span::styled(" j/k ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+                Span::raw(" Select  "),
+                Span::styled(" Tab/l ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+                Span::raw(" Details  "),
+                Span::styled(" L ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+                Span::raw(" Log  "),
+                Span::styled(" D ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+                Span::raw(" Diff  "),
+                Span::styled(" a/Enter ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+                Span::raw(" Apply  "),
+                Span::styled(" q ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+                Span::raw(" Quit"),
+            ],
+            FocusedPanel::Details => vec![
+                Span::styled(" j/k ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+                Span::raw(" Scroll  "),
+                Span::styled(" g/G ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+                Span::raw(" Top/Bottom  "),
+                Span::styled(" / ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+                Span::raw(" Search  "),
+                Span::styled(" n/N ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+                Span::raw(" Next/Prev  "),
+                Span::styled(" Tab/h ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+                Span::raw(" Models  "),
+                Span::styled(" q ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+                Span::raw(" Quit"),
+            ],
+        },
     };
 
     let help_line = Line::from(help_spans);
