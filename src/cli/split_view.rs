@@ -620,6 +620,8 @@ fn render_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             FocusedPanel::Details => vec![
                 Span::styled(" j/k ", Style::new().fg(Color::Black).bg(Color::Cyan)),
                 Span::raw(" Scroll  "),
+                Span::styled(" Tab/h ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+                Span::raw(" Models  "),
                 Span::styled(" / ", Style::new().fg(Color::Black).bg(Color::Cyan)),
                 Span::raw(" Search  "),
                 Span::styled(" n/N ", Style::new().fg(Color::Black).bg(Color::Cyan)),
@@ -628,8 +630,6 @@ fn render_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 Span::raw(" Log  "),
                 Span::styled(" d ", Style::new().fg(Color::Black).bg(Color::Cyan)),
                 Span::raw(" Diff  "),
-                Span::styled(" Tab/h ", Style::new().fg(Color::Black).bg(Color::Cyan)),
-                Span::raw(" Models  "),
                 Span::styled(" q ", Style::new().fg(Color::Black).bg(Color::Cyan)),
                 Span::raw(" Quit"),
             ],
