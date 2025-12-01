@@ -135,6 +135,10 @@ async fn copy_uncommitted_changes(source: &Path, worktree: &Path) -> Result<()> 
             if let Some(parent) = dst_path.parent() {
                 tokio::fs::create_dir_all(parent).await?;
             }
+            // Remove target file first to avoid "Text file busy" error (ETXTBSY)
+            if dst_path.exists() {
+                tokio::fs::remove_file(&dst_path).await?;
+            }
             tokio::fs::copy(&src_path, &dst_path).await?;
         } else if src_path.is_dir() {
             // Copy directory recursively
@@ -169,6 +173,10 @@ async fn copy_dir_to_worktree(src: &Path, dst: &Path) -> Result<()> {
         if file_type.is_dir() {
             copy_dir_to_worktree(&src_path, &dst_path).await?;
         } else if file_type.is_file() {
+            // Remove target file first to avoid "Text file busy" error (ETXTBSY)
+            if dst_path.exists() {
+                tokio::fs::remove_file(&dst_path).await?;
+            }
             tokio::fs::copy(&src_path, &dst_path).await?;
         }
     }

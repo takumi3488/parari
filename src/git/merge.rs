@@ -79,6 +79,11 @@ async fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
             tokio::fs::create_dir_all(&dst_path).await?;
             copy_dir_recursive(&src_path, &dst_path).await?;
         } else if file_type.is_file() {
+            // Remove target file first to avoid "Text file busy" error
+            // when overwriting a running executable (ETXTBSY)
+            if dst_path.exists() {
+                tokio::fs::remove_file(&dst_path).await?;
+            }
             tokio::fs::copy(&src_path, &dst_path).await?;
         }
         // Skip symlinks for now
