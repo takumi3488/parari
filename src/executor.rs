@@ -13,4 +13,4 @@ pub use claude::ClaudeExecutor;
 pub use codex::CodexExecutor;
 pub use gemini::GeminiExecutor;
 pub use mock::MockExecutor;
-pub use traits::{ExecutionResult, Executor};
+pub use traits::{ExecutionResult, Executor, OutputLine};

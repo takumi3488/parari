@@ -3,7 +3,7 @@ use std::path::Path;
 use async_trait::async_trait;
 use tokio::process::Command;
 
-use super::traits::{ExecutionResult, Executor};
+use super::traits::{ExecutionResult, Executor, execute_with_ordered_output};
 use crate::error::{Error, Result};
 
 /// Executor for OpenAI Codex CLI
@@ -37,34 +37,13 @@ impl Executor for CodexExecutor {
             });
         }
 
-        let output = Command::new("codex")
-            .arg("--full-auto")
+        let mut cmd = Command::new("codex");
+        cmd.arg("--full-auto")
             .arg("exec")
             .arg(prompt)
-            .current_dir(working_dir)
-            .output()
-            .await?;
+            .current_dir(working_dir);
 
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        let exit_code = output.status.code();
-
-        if output.status.success() {
-            Ok(ExecutionResult {
-                executor_name: self.name().to_string(),
-                success: true,
-                stdout,
-                stderr,
-                exit_code,
-            })
-        } else {
-            Ok(ExecutionResult {
-                executor_name: self.name().to_string(),
-                success: false,
-                stdout,
-                stderr,
-                exit_code,
-            })
-        }
+        let result = execute_with_ordered_output(cmd, self.name()).await?;
+        Ok(result)
     }
 }

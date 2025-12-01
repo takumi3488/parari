@@ -11,6 +11,7 @@ use ratatui::widgets::{Block, List, ListItem, ListState, Paragraph, Wrap};
 
 use crate::domain::ResultInfo;
 use crate::error::{Error, Result};
+use crate::executor::OutputLine;
 
 /// Mode for the detail view
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -626,6 +627,9 @@ fn strip_ansi_codes(s: &str) -> String {
     result
 }
 
+/// Special marker for stderr lines (invisible character used for detection in style_log_line)
+const STDERR_MARKER: &str = "\x01STDERR\x02";
+
 fn get_log_content_string(info: &ResultInfo) -> String {
     let mut content = String::new();
 
@@ -660,36 +664,31 @@ fn get_log_content_string(info: &ResultInfo) -> String {
     }
     content.push('\n');
 
-    // STDOUT
+    // Output (stdout and stderr interleaved in order of arrival)
     content.push_str(&"-".repeat(50));
     content.push('\n');
-    content.push_str("STDOUT:\n");
+    content.push_str("Output:\n");
     content.push_str(&"-".repeat(50));
     content.push('\n');
 
-    if info.stdout.is_empty() {
+    if info.output_lines.is_empty() {
         content.push_str("(no output)\n");
     } else {
-        let cleaned_stdout = strip_ansi_codes(&info.stdout);
-        content.push_str(&cleaned_stdout);
-        if !cleaned_stdout.ends_with('\n') {
-            content.push('\n');
-        }
-    }
-    content.push('\n');
-
-    // STDERR
-    if !info.stderr.is_empty() {
-        content.push_str(&"-".repeat(50));
-        content.push('\n');
-        content.push_str("STDERR:\n");
-        content.push_str(&"-".repeat(50));
-        content.push('\n');
-
-        let cleaned_stderr = strip_ansi_codes(&info.stderr);
-        content.push_str(&cleaned_stderr);
-        if !cleaned_stderr.ends_with('\n') {
-            content.push('\n');
+        for output_line in &info.output_lines {
+            match output_line {
+                OutputLine::Stdout(line) => {
+                    let cleaned = strip_ansi_codes(line);
+                    content.push_str(&cleaned);
+                    content.push('\n');
+                }
+                OutputLine::Stderr(line) => {
+                    // Add marker for stderr lines so style_log_line can detect them
+                    let cleaned = strip_ansi_codes(line);
+                    content.push_str(STDERR_MARKER);
+                    content.push_str(&cleaned);
+                    content.push('\n');
+                }
+            }
         }
     }
 
@@ -778,18 +777,35 @@ fn get_styled_content_with_search(content: &str, mode: ViewMode, query: &str) ->
     let query_lower = query.to_lowercase();
 
     for line in content.lines() {
-        let line_lower = line.to_lowercase();
+        // Handle stderr marker
+        let (actual_line, is_stderr) = if let Some(stripped) = line.strip_prefix(STDERR_MARKER) {
+            (stripped, true)
+        } else {
+            (line, false)
+        };
+
+        let line_lower = actual_line.to_lowercase();
         if line_lower.contains(&query_lower) {
             // Highlight search matches
             let mut spans = Vec::new();
             let mut last_end = 0;
 
+            // Base style for stderr lines
+            let base_style = if is_stderr {
+                Style::new().fg(Color::Red)
+            } else {
+                Style::new()
+            };
+
             for (start, _) in line_lower.match_indices(&query_lower) {
                 if start > last_end {
-                    spans.push(Span::raw(line[last_end..start].to_string()));
+                    spans.push(Span::styled(
+                        actual_line[last_end..start].to_string(),
+                        base_style,
+                    ));
                 }
                 spans.push(Span::styled(
-                    line[start..start + query.len()].to_string(),
+                    actual_line[start..start + query.len()].to_string(),
                     Style::new()
                         .fg(Color::Black)
                         .bg(Color::Yellow)
@@ -798,8 +814,11 @@ fn get_styled_content_with_search(content: &str, mode: ViewMode, query: &str) ->
                 last_end = start + query.len();
             }
 
-            if last_end < line.len() {
-                spans.push(Span::raw(line[last_end..].to_string()));
+            if last_end < actual_line.len() {
+                spans.push(Span::styled(
+                    actual_line[last_end..].to_string(),
+                    base_style,
+                ));
             }
 
             lines.push(Line::from(spans));
@@ -816,7 +835,12 @@ fn get_styled_content_with_search(content: &str, mode: ViewMode, query: &str) ->
 }
 
 fn style_log_line(line: &str) -> Line<'static> {
-    if line.starts_with("STDOUT:") || line.starts_with("STDERR:") || line.starts_with("Summary:") {
+    // Check for stderr marker first - display in red and remove the marker
+    if let Some(content) = line.strip_prefix(STDERR_MARKER) {
+        return Line::styled(content.to_string(), Style::new().fg(Color::Red));
+    }
+
+    if line.starts_with("Output:") || line.starts_with("Summary:") {
         Line::styled(line.to_string(), Style::new().add_modifier(Modifier::BOLD))
     } else if line.starts_with("  +") {
         Line::styled(line.to_string(), Style::new().fg(Color::Green))
@@ -906,6 +930,7 @@ mod tests {
                 success: true,
                 stdout: "output".to_string(),
                 stderr: "".to_string(),
+                output_lines: vec![OutputLine::Stdout("output".to_string())],
                 files_changed: 1,
                 worktree_path: PathBuf::from("/tmp/test1"),
                 change_summary: Some(ChangeSummary {
@@ -920,6 +945,7 @@ mod tests {
                 success: true,
                 stdout: "output".to_string(),
                 stderr: "".to_string(),
+                output_lines: vec![OutputLine::Stdout("output".to_string())],
                 files_changed: 2,
                 worktree_path: PathBuf::from("/tmp/test2"),
                 change_summary: None,

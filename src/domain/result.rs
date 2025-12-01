@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use crate::error::Result;
+use crate::executor::OutputLine;
 use crate::git;
 
 use super::task::TaskResult;
@@ -35,6 +36,8 @@ pub struct ResultInfo {
     pub stdout: String,
     /// Standard error from the executor
     pub stderr: String,
+    /// Output lines in order of arrival (stdout and stderr interleaved)
+    pub output_lines: Vec<OutputLine>,
 }
 
 /// Prepare result information for display
@@ -57,6 +60,7 @@ pub async fn prepare_result_info(
         worktree_path: result.worktree_path.clone(),
         stdout: result.execution.stdout.clone(),
         stderr: result.execution.stderr.clone(),
+        output_lines: result.execution.output_lines.clone(),
     })
 }
 
