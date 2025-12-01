@@ -1,13 +1,13 @@
 use std::path::Path;
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use cursive::Cursive;
-use cursive::event::Key;
-use cursive::theme::{BaseColor, Color, Style};
-use cursive::traits::*;
-use cursive::utils::markup::StyledString;
-use cursive::views::{Dialog, DummyView, LinearLayout, Panel, ScrollView, SelectView, TextView};
+use ratatui::Frame;
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use ratatui::layout::{Constraint, Layout, Position};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, List, ListItem, ListState, Paragraph, Wrap};
 
 use crate::domain::ResultInfo;
 use crate::error::{Error, Result};
@@ -19,13 +19,6 @@ enum ViewMode {
     Diff,
 }
 
-/// Result from the split view selection
-#[derive(Debug, Clone)]
-pub enum SplitViewResult {
-    Apply(usize),
-    Cancel,
-}
-
 /// Which panel is focused
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum FocusedPanel {
@@ -33,13 +26,327 @@ enum FocusedPanel {
     Details,
 }
 
-/// State shared between callbacks
-struct ViewState {
+/// Input mode for the application
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum InputMode {
+    Normal,
+    Search,
+}
+
+/// Result from the split view selection
+#[derive(Debug, Clone)]
+pub enum SplitViewResult {
+    Apply(usize),
+    Cancel,
+}
+
+/// Application state
+struct App {
     result_infos: Vec<ResultInfo>,
+    list_state: ListState,
     current_mode: ViewMode,
-    selected_index: usize,
-    result: Option<SplitViewResult>,
     focused_panel: FocusedPanel,
+    input_mode: InputMode,
+    scroll_offset: u16,
+    content_height: u16,
+    search_query: String,
+    search_matches: Vec<u16>,
+    search_match_index: usize,
+    result: Option<SplitViewResult>,
+}
+
+impl App {
+    fn new(result_infos: Vec<ResultInfo>) -> Self {
+        let mut list_state = ListState::default();
+        if !result_infos.is_empty() {
+            list_state.select(Some(0));
+        }
+
+        Self {
+            result_infos,
+            list_state,
+            current_mode: ViewMode::Log,
+            focused_panel: FocusedPanel::Models,
+            input_mode: InputMode::Normal,
+            scroll_offset: 0,
+            content_height: 0,
+            search_query: String::new(),
+            search_matches: Vec::new(),
+            search_match_index: 0,
+            result: None,
+        }
+    }
+
+    fn selected_index(&self) -> usize {
+        self.list_state.selected().unwrap_or(0)
+    }
+
+    fn selected_info(&self) -> Option<&ResultInfo> {
+        self.result_infos.get(self.selected_index())
+    }
+
+    fn next_model(&mut self) {
+        if self.result_infos.is_empty() {
+            return;
+        }
+        let i = match self.list_state.selected() {
+            Some(i) => {
+                if i + 1 < self.result_infos.len() {
+                    i + 1
+                } else {
+                    i
+                }
+            }
+            None => 0,
+        };
+        self.list_state.select(Some(i));
+        self.scroll_offset = 0;
+        self.clear_search();
+    }
+
+    fn previous_model(&mut self) {
+        let i = match self.list_state.selected() {
+            Some(i) => {
+                if i > 0 {
+                    i - 1
+                } else {
+                    0
+                }
+            }
+            None => 0,
+        };
+        self.list_state.select(Some(i));
+        self.scroll_offset = 0;
+        self.clear_search();
+    }
+
+    fn scroll_down(&mut self, lines: u16) {
+        self.scroll_offset = self.scroll_offset.saturating_add(lines);
+    }
+
+    fn scroll_up(&mut self, lines: u16) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(lines);
+    }
+
+    fn scroll_to_top(&mut self) {
+        self.scroll_offset = 0;
+    }
+
+    fn scroll_to_bottom(&mut self) {
+        if self.content_height > 0 {
+            self.scroll_offset = self.content_height.saturating_sub(1);
+        }
+    }
+
+    fn half_page_down(&mut self, viewport_height: u16) {
+        self.scroll_down(viewport_height / 2);
+    }
+
+    fn half_page_up(&mut self, viewport_height: u16) {
+        self.scroll_up(viewport_height / 2);
+    }
+
+    fn set_mode(&mut self, mode: ViewMode) {
+        if self.current_mode != mode {
+            self.current_mode = mode;
+            self.scroll_offset = 0;
+            self.clear_search();
+        }
+    }
+
+    fn toggle_focus(&mut self) {
+        self.focused_panel = match self.focused_panel {
+            FocusedPanel::Models => FocusedPanel::Details,
+            FocusedPanel::Details => FocusedPanel::Models,
+        };
+    }
+
+    fn start_search(&mut self) {
+        self.input_mode = InputMode::Search;
+        self.search_query.clear();
+        self.search_matches.clear();
+        self.search_match_index = 0;
+    }
+
+    fn cancel_search(&mut self) {
+        self.input_mode = InputMode::Normal;
+    }
+
+    fn clear_search(&mut self) {
+        self.search_query.clear();
+        self.search_matches.clear();
+        self.search_match_index = 0;
+    }
+
+    fn execute_search(&mut self, content: &str) {
+        self.input_mode = InputMode::Normal;
+        if self.search_query.is_empty() {
+            return;
+        }
+
+        self.search_matches.clear();
+        let query_lower = self.search_query.to_lowercase();
+
+        for (line_num, line) in content.lines().enumerate() {
+            if line.to_lowercase().contains(&query_lower) {
+                self.search_matches.push(line_num as u16);
+            }
+        }
+
+        if !self.search_matches.is_empty() {
+            self.search_match_index = 0;
+            self.scroll_offset = self.search_matches[0];
+        }
+    }
+
+    fn next_search_match(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        self.search_match_index = (self.search_match_index + 1) % self.search_matches.len();
+        self.scroll_offset = self.search_matches[self.search_match_index];
+    }
+
+    fn previous_search_match(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        if self.search_match_index == 0 {
+            self.search_match_index = self.search_matches.len() - 1;
+        } else {
+            self.search_match_index -= 1;
+        }
+        self.scroll_offset = self.search_matches[self.search_match_index];
+    }
+
+    fn apply(&mut self) {
+        self.result = Some(SplitViewResult::Apply(self.selected_index()));
+    }
+
+    fn cancel(&mut self) {
+        self.result = Some(SplitViewResult::Cancel);
+    }
+
+    fn handle_event(&mut self, event: Event, viewport_height: u16, content: &str) -> bool {
+        if let Event::Key(key) = event {
+            if key.kind != KeyEventKind::Press {
+                return false;
+            }
+
+            match self.input_mode {
+                InputMode::Search => {
+                    match key.code {
+                        KeyCode::Enter => {
+                            self.execute_search(content);
+                        }
+                        KeyCode::Esc => {
+                            self.cancel_search();
+                        }
+                        KeyCode::Backspace => {
+                            self.search_query.pop();
+                        }
+                        KeyCode::Char(c) => {
+                            self.search_query.push(c);
+                        }
+                        _ => {}
+                    }
+                    return false;
+                }
+                InputMode::Normal => {
+                    match self.focused_panel {
+                        FocusedPanel::Models => {
+                            match key.code {
+                                // Model navigation
+                                KeyCode::Char('j') | KeyCode::Down => self.next_model(),
+                                KeyCode::Char('k') | KeyCode::Up => self.previous_model(),
+
+                                // Focus switch
+                                KeyCode::Tab | KeyCode::Char('l') | KeyCode::Right => {
+                                    self.toggle_focus()
+                                }
+
+                                // Mode switching
+                                KeyCode::Char('L') => self.set_mode(ViewMode::Log),
+                                KeyCode::Char('D') => self.set_mode(ViewMode::Diff),
+
+                                // Actions
+                                KeyCode::Char('a') | KeyCode::Enter => {
+                                    self.apply();
+                                    return true;
+                                }
+                                KeyCode::Char('q') | KeyCode::Esc => {
+                                    self.cancel();
+                                    return true;
+                                }
+
+                                _ => {}
+                            }
+                        }
+                        FocusedPanel::Details => {
+                            match key.code {
+                                // Vim-style scrolling
+                                KeyCode::Char('j') | KeyCode::Down => self.scroll_down(1),
+                                KeyCode::Char('k') | KeyCode::Up => self.scroll_up(1),
+                                KeyCode::Char('d')
+                                    if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                                {
+                                    self.half_page_down(viewport_height)
+                                }
+                                KeyCode::Char('u')
+                                    if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                                {
+                                    self.half_page_up(viewport_height)
+                                }
+                                KeyCode::Char('f')
+                                    if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                                {
+                                    self.scroll_down(viewport_height)
+                                }
+                                KeyCode::Char('b')
+                                    if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                                {
+                                    self.scroll_up(viewport_height)
+                                }
+                                KeyCode::Char('g') => self.scroll_to_top(),
+                                KeyCode::Char('G') => self.scroll_to_bottom(),
+                                KeyCode::Home => self.scroll_to_top(),
+                                KeyCode::End => self.scroll_to_bottom(),
+                                KeyCode::PageDown => self.scroll_down(viewport_height),
+                                KeyCode::PageUp => self.scroll_up(viewport_height),
+
+                                // Search
+                                KeyCode::Char('/') => self.start_search(),
+                                KeyCode::Char('n') => self.next_search_match(),
+                                KeyCode::Char('N') => self.previous_search_match(),
+
+                                // Focus switch
+                                KeyCode::Tab | KeyCode::Char('h') | KeyCode::Left => {
+                                    self.toggle_focus()
+                                }
+
+                                // Mode switching
+                                KeyCode::Char('L') => self.set_mode(ViewMode::Log),
+                                KeyCode::Char('D') => self.set_mode(ViewMode::Diff),
+
+                                // Actions (also available in detail view)
+                                KeyCode::Char('a') => {
+                                    self.apply();
+                                    return true;
+                                }
+                                KeyCode::Char('q') | KeyCode::Esc => {
+                                    self.cancel();
+                                    return true;
+                                }
+
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
 }
 
 /// Display results in a split view and allow user to select one
@@ -48,328 +355,246 @@ pub fn select_result_split_view(result_infos: &[ResultInfo]) -> Result<usize> {
         return Err(Error::NoExecutorsAvailable);
     }
 
-    let state = Arc::new(Mutex::new(ViewState {
-        result_infos: result_infos.to_vec(),
-        current_mode: ViewMode::Log,
-        selected_index: 0,
-        result: None,
-        focused_panel: FocusedPanel::Models,
-    }));
+    let mut terminal = ratatui::init();
+    let mut app = App::new(result_infos.to_vec());
+    let mut cached_content = String::new();
+    let mut last_selected = 0usize;
+    let mut last_mode = app.current_mode;
 
-    let mut siv = cursive::default();
+    loop {
+        // Update content cache if selection or mode changed
+        if app.selected_index() != last_selected || app.current_mode != last_mode {
+            if let Some(info) = app.selected_info() {
+                cached_content = match app.current_mode {
+                    ViewMode::Log => get_log_content_string(info),
+                    ViewMode::Diff => get_diff_content_string(&info.worktree_path),
+                };
+                app.content_height = cached_content.lines().count() as u16;
+            }
+            last_selected = app.selected_index();
+            last_mode = app.current_mode;
+        }
 
-    // Build the UI
-    build_ui(&mut siv, Arc::clone(&state));
+        let viewport_height = terminal
+            .size()
+            .map(|s| s.height.saturating_sub(4))
+            .unwrap_or(20);
 
-    // Set up global callbacks
-    setup_callbacks(&mut siv, Arc::clone(&state));
+        terminal
+            .draw(|frame| render(frame, &mut app, &cached_content))
+            .map_err(|e| Error::Io(std::io::Error::other(e.to_string())))?;
 
-    // Run the UI
-    siv.run();
+        if event::poll(Duration::from_millis(100))
+            .map_err(|e| Error::Io(std::io::Error::other(e.to_string())))?
+        {
+            let event =
+                event::read().map_err(|e| Error::Io(std::io::Error::other(e.to_string())))?;
+            if app.handle_event(event, viewport_height, &cached_content) {
+                break;
+            }
+        }
+    }
 
-    // Get the result
-    let state = state.lock().unwrap();
-    match &state.result {
-        Some(SplitViewResult::Apply(index)) => Ok(*index),
+    ratatui::restore();
+
+    match app.result {
+        Some(SplitViewResult::Apply(index)) => Ok(index),
         Some(SplitViewResult::Cancel) | None => Err(Error::UserCancelled),
     }
 }
 
-fn build_ui(siv: &mut Cursive, state: Arc<Mutex<ViewState>>) {
-    let state_guard = state.lock().unwrap();
-
-    // Build left panel: model list with highlighting
-    let mut select_view = SelectView::<usize>::new().h_align(cursive::align::HAlign::Left);
-    for (i, info) in state_guard.result_infos.iter().enumerate() {
-        let emoji = get_agent_emoji(&info.executor_name);
-        let status = if info.success { "+" } else { "x" };
-        let label = format!(
-            "{} {} [{}] ({} files)",
-            emoji, info.executor_name, status, info.files_changed
-        );
-        select_view.add_item(label, i);
-    }
-
-    let state_for_select = Arc::clone(&state);
-    select_view.set_on_select(move |siv, &index| {
-        let mut state = state_for_select.lock().unwrap();
-        state.selected_index = index;
-        drop(state);
-        update_detail_panel(siv, Arc::clone(&state_for_select));
-    });
-
-    // Style for focused panel title (cyan color with arrow)
-    let focused_style = Style::from(Color::Light(BaseColor::Cyan));
-    let mut models_title = StyledString::new();
-    models_title.append_styled("▶ Models", focused_style);
-
-    let select_panel = Panel::new(
-        select_view
-            .with_name("model_list")
-            .scrollable()
-            .min_width(28),
-    )
-    .title(models_title)
-    .with_name("models_panel");
-
-    // Build right panel: detail view
-    let detail_content = get_detail_content(&state_guard.result_infos[0], ViewMode::Log);
-
-    let scroll_view = ScrollView::new(TextView::new(detail_content).with_name("detail_view"))
-        .scroll_x(true)
-        .with_name("detail_scroll");
-
-    let detail_panel = Panel::new(scroll_view)
-        .title("Log")
-        .with_name("detail_panel")
-        .full_screen();
-
-    drop(state_guard);
-
-    // Build the main layout
-    let main_layout = LinearLayout::horizontal()
-        .child(select_panel)
-        .child(DummyView.fixed_width(1))
-        .child(detail_panel);
-
-    // Build the help bar
-    let help_text = "[f] Focus  [l] Log  [d] Diff  [a] Apply  [q] Cancel";
-
-    let root_layout = LinearLayout::vertical()
-        .child(main_layout)
-        .child(DummyView.fixed_height(1))
-        .child(TextView::new(help_text).center());
-
-    // Set up theme for better visibility
-    siv.set_theme(create_theme());
-
-    siv.add_layer(
-        Dialog::around(root_layout)
-            .title("Parari - Results")
-            .full_screen(),
-    );
-}
-
-fn create_theme() -> cursive::theme::Theme {
-    use cursive::theme::{BaseColor, Color, PaletteColor, Theme};
-
-    let mut theme = Theme::default();
-
-    // Make selection more visible with cyan highlight
-    theme.palette[PaletteColor::Highlight] = Color::Dark(BaseColor::Cyan);
-    theme.palette[PaletteColor::HighlightInactive] = Color::Dark(BaseColor::Blue);
-    theme.palette[PaletteColor::HighlightText] = Color::Dark(BaseColor::Black);
-
-    theme
-}
-
-fn setup_callbacks(siv: &mut Cursive, state: Arc<Mutex<ViewState>>) {
-    // 'f': toggle focus between panels
-    // Note: Tab key is reserved by cursive for default focus navigation
-    let state_for_f = Arc::clone(&state);
-    siv.add_global_callback('f', move |siv| {
-        {
-            let mut state_guard = state_for_f.lock().unwrap();
-            state_guard.focused_panel = match state_guard.focused_panel {
-                FocusedPanel::Models => FocusedPanel::Details,
-                FocusedPanel::Details => FocusedPanel::Models,
-            };
-        }
-        update_panel_titles(siv, Arc::clone(&state_for_f));
-
-        let focused = state_for_f.lock().unwrap().focused_panel;
-        match focused {
-            FocusedPanel::Models => {
-                siv.focus_name("model_list").ok();
-            }
-            FocusedPanel::Details => {
-                siv.focus_name("detail_scroll").ok();
-            }
-        }
-    });
-
-    // 'l': show log (output)
-    let state_for_log = Arc::clone(&state);
-    siv.add_global_callback('l', move |siv| {
-        {
-            let mut state = state_for_log.lock().unwrap();
-            state.current_mode = ViewMode::Log;
-        }
-        update_detail_panel(siv, Arc::clone(&state_for_log));
-        update_panel_titles(siv, Arc::clone(&state_for_log));
-    });
-
-    // 'd': show diff
-    let state_for_diff = Arc::clone(&state);
-    siv.add_global_callback('d', move |siv| {
-        {
-            let mut state = state_for_diff.lock().unwrap();
-            state.current_mode = ViewMode::Diff;
-        }
-        update_detail_panel(siv, Arc::clone(&state_for_diff));
-        update_panel_titles(siv, Arc::clone(&state_for_diff));
-    });
-
-    // 'a' or 'A': apply
-    let state_for_apply = Arc::clone(&state);
-    siv.add_global_callback('a', move |siv| {
-        let mut state = state_for_apply.lock().unwrap();
-        state.result = Some(SplitViewResult::Apply(state.selected_index));
-        siv.quit();
-    });
-
-    let state_for_apply_upper = Arc::clone(&state);
-    siv.add_global_callback('A', move |siv| {
-        let mut state = state_for_apply_upper.lock().unwrap();
-        state.result = Some(SplitViewResult::Apply(state.selected_index));
-        siv.quit();
-    });
-
-    // Esc or 'q': cancel
-    let state_for_cancel = Arc::clone(&state);
-    siv.add_global_callback(Key::Esc, move |siv| {
-        let mut state = state_for_cancel.lock().unwrap();
-        state.result = Some(SplitViewResult::Cancel);
-        siv.quit();
-    });
-
-    let state_for_quit = Arc::clone(&state);
-    siv.add_global_callback('q', move |siv| {
-        let mut state = state_for_quit.lock().unwrap();
-        state.result = Some(SplitViewResult::Cancel);
-        siv.quit();
-    });
-
-    // Vim-style navigation
-    let state_for_j = Arc::clone(&state);
-    siv.add_global_callback('j', move |siv| {
-        let new_index = siv
-            .call_on_name("model_list", |view: &mut SelectView<usize>| {
-                let current = view.selected_id().unwrap_or(0);
-                let count = view.len();
-                if current + 1 < count {
-                    view.set_selection(current + 1);
-                    Some(current + 1)
-                } else {
-                    None
-                }
-            })
-            .flatten();
-
-        if let Some(index) = new_index {
-            let mut state = state_for_j.lock().unwrap();
-            state.selected_index = index;
-            drop(state);
-            update_detail_panel(siv, Arc::clone(&state_for_j));
-        }
-    });
-
-    let state_for_k = Arc::clone(&state);
-    siv.add_global_callback('k', move |siv| {
-        let new_index = siv
-            .call_on_name("model_list", |view: &mut SelectView<usize>| {
-                let current = view.selected_id().unwrap_or(0);
-                if current > 0 {
-                    view.set_selection(current - 1);
-                    Some(current - 1)
-                } else {
-                    None
-                }
-            })
-            .flatten();
-
-        if let Some(index) = new_index {
-            let mut state = state_for_k.lock().unwrap();
-            state.selected_index = index;
-            drop(state);
-            update_detail_panel(siv, Arc::clone(&state_for_k));
-        }
-    });
-}
-
-fn update_detail_panel(siv: &mut Cursive, state: Arc<Mutex<ViewState>>) {
-    let state_guard = state.lock().unwrap();
-    let info = &state_guard.result_infos[state_guard.selected_index];
-    let content = get_detail_content(info, state_guard.current_mode);
-    drop(state_guard);
-
-    siv.call_on_name("detail_view", |view: &mut TextView| {
-        view.set_content(content);
-    });
-}
-
-fn update_panel_titles(siv: &mut Cursive, state: Arc<Mutex<ViewState>>) {
-    let state_guard = state.lock().unwrap();
-    let mode = state_guard.current_mode;
-    let focused = state_guard.focused_panel;
-    drop(state_guard);
-
-    // Style for focused panel title (cyan color with arrow)
-    let focused_style = Style::from(Color::Light(BaseColor::Cyan));
-
-    // Update models panel title
-    let models_title = match focused {
-        FocusedPanel::Models => {
-            let mut styled = StyledString::new();
-            styled.append_styled("▶ Models", focused_style);
-            styled
-        }
-        FocusedPanel::Details => StyledString::plain("Models"),
+fn render(frame: &mut Frame, app: &mut App, content: &str) {
+    // Main layout: body + search bar (if searching) + footer
+    let layout = if app.input_mode == InputMode::Search {
+        Layout::vertical([
+            Constraint::Fill(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(frame.area())
+    } else {
+        Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).split(frame.area())
     };
 
-    // Update detail panel title with mode and focus indicator
-    let detail_title = match (focused, mode) {
-        (FocusedPanel::Details, ViewMode::Log) => {
-            let mut styled = StyledString::new();
-            styled.append_styled("▶ Log", focused_style);
-            styled
-        }
-        (FocusedPanel::Details, ViewMode::Diff) => {
-            let mut styled = StyledString::new();
-            styled.append_styled("▶ Diff", focused_style);
-            styled
-        }
-        (FocusedPanel::Models, ViewMode::Log) => StyledString::plain("Log"),
-        (FocusedPanel::Models, ViewMode::Diff) => StyledString::plain("Diff"),
-    };
+    let body = layout[0];
+    let footer_idx = layout.len() - 1;
 
-    // Type aliases for readability
-    type ModelsPanel = Panel<
-        cursive::views::ResizedView<
-            cursive::views::ScrollView<cursive::views::NamedView<SelectView<usize>>>,
-        >,
-    >;
-    type DetailPanel =
-        Panel<cursive::views::NamedView<ScrollView<cursive::views::NamedView<TextView>>>>;
+    // Body layout: left panel (models) + right panel (details)
+    let [left_panel, right_panel] =
+        Layout::horizontal([Constraint::Length(32), Constraint::Fill(1)]).areas(body);
 
-    siv.call_on_name("models_panel", |view: &mut ModelsPanel| {
-        view.set_title(models_title);
-    });
+    // Render model list
+    render_model_list(frame, app, left_panel);
 
-    siv.call_on_name("detail_panel", |view: &mut DetailPanel| {
-        view.set_title(detail_title);
-    });
+    // Render detail panel
+    render_detail_panel(frame, app, right_panel, content);
+
+    // Render search bar if in search mode
+    if app.input_mode == InputMode::Search {
+        render_search_bar(frame, app, layout[1]);
+    }
+
+    // Render help footer
+    render_footer(frame, app, layout[footer_idx]);
 }
 
-fn get_detail_content(info: &ResultInfo, mode: ViewMode) -> StyledString {
-    match mode {
-        ViewMode::Log => StyledString::plain(get_log_content(info)),
-        ViewMode::Diff => get_diff_content_styled(&info.worktree_path),
-    }
+fn render_model_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let items: Vec<ListItem> = app
+        .result_infos
+        .iter()
+        .map(|info| {
+            let emoji = get_agent_emoji(&info.executor_name);
+            let status = if info.success { "+" } else { "x" };
+            let label = format!(
+                "{} {} [{}] ({} files)",
+                emoji, info.executor_name, status, info.files_changed
+            );
+            ListItem::new(label)
+        })
+        .collect();
+
+    let is_focused = app.focused_panel == FocusedPanel::Models;
+    let border_style = if is_focused {
+        Style::new().fg(Color::Cyan)
+    } else {
+        Style::new().fg(Color::DarkGray)
+    };
+
+    let title = if is_focused {
+        "▶ Models "
+    } else {
+        " Models "
+    };
+
+    let list = List::new(items)
+        .block(Block::bordered().title(title).border_style(border_style))
+        .highlight_style(
+            Style::new()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▶ ");
+
+    frame.render_stateful_widget(list, area, &mut app.list_state);
+}
+
+fn render_detail_panel(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, content: &str) {
+    let mode_name = match app.current_mode {
+        ViewMode::Log => "Log",
+        ViewMode::Diff => "Diff",
+    };
+
+    let is_focused = app.focused_panel == FocusedPanel::Details;
+    let border_style = if is_focused {
+        Style::new().fg(Color::Cyan)
+    } else {
+        Style::new().fg(Color::DarkGray)
+    };
+
+    let title = if is_focused {
+        format!("▶ {} ", mode_name)
+    } else {
+        format!(" {} ", mode_name)
+    };
+
+    // Build styled content with search highlighting
+    let text = if app.search_query.is_empty() {
+        get_styled_content(content, app.current_mode)
+    } else {
+        get_styled_content_with_search(content, app.current_mode, &app.search_query)
+    };
+
+    // Show search match count if searching
+    let title_with_search = if !app.search_matches.is_empty() {
+        format!(
+            "{} [{}/{}]",
+            title,
+            app.search_match_index + 1,
+            app.search_matches.len()
+        )
+    } else if !app.search_query.is_empty() {
+        format!("{} [no matches]", title)
+    } else {
+        title
+    };
+
+    let paragraph = Paragraph::new(text)
+        .block(
+            Block::bordered()
+                .title(title_with_search)
+                .border_style(border_style),
+        )
+        .wrap(Wrap { trim: false })
+        .scroll((app.scroll_offset, 0));
+
+    frame.render_widget(paragraph, area);
+}
+
+fn render_search_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let search_line = Line::from(vec![
+        Span::styled("/", Style::new().fg(Color::Yellow)),
+        Span::raw(&app.search_query),
+        Span::styled("_", Style::new().add_modifier(Modifier::SLOW_BLINK)),
+    ]);
+
+    let search_bar = Paragraph::new(search_line);
+    frame.render_widget(search_bar, area);
+
+    // Set cursor position
+    frame.set_cursor_position(Position::new(
+        area.x + 1 + app.search_query.len() as u16,
+        area.y,
+    ));
+}
+
+fn render_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let help_spans = match app.focused_panel {
+        FocusedPanel::Models => vec![
+            Span::styled(" j/k ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+            Span::raw(" Select  "),
+            Span::styled(" Tab/l ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+            Span::raw(" Details  "),
+            Span::styled(" L ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+            Span::raw(" Log  "),
+            Span::styled(" D ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+            Span::raw(" Diff  "),
+            Span::styled(" a/Enter ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+            Span::raw(" Apply  "),
+            Span::styled(" q ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+            Span::raw(" Quit"),
+        ],
+        FocusedPanel::Details => vec![
+            Span::styled(" j/k ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+            Span::raw(" Scroll  "),
+            Span::styled(" g/G ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+            Span::raw(" Top/Bottom  "),
+            Span::styled(" / ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+            Span::raw(" Search  "),
+            Span::styled(" n/N ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+            Span::raw(" Next/Prev  "),
+            Span::styled(" Tab/h ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+            Span::raw(" Models  "),
+            Span::styled(" q ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+            Span::raw(" Quit"),
+        ],
+    };
+
+    let help_line = Line::from(help_spans);
+    let help = Paragraph::new(help_line);
+
+    frame.render_widget(help, area);
 }
 
 /// Strip ANSI escape codes from a string
 fn strip_ansi_codes(s: &str) -> String {
-    // Regex pattern for ANSI escape codes: ESC [ ... m (and other sequences)
     let mut result = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
 
     while let Some(c) = chars.next() {
         if c == '\x1b' {
-            // Check for escape sequence
             if chars.peek() == Some(&'[') {
-                chars.next(); // consume '['
-                // Skip until we hit a letter (the terminator)
+                chars.next();
                 while let Some(&next) = chars.peek() {
                     chars.next();
                     if next.is_ascii_alphabetic() {
@@ -377,9 +602,7 @@ fn strip_ansi_codes(s: &str) -> String {
                     }
                 }
             } else if chars.peek() == Some(&']') {
-                // OSC sequence (Operating System Command)
-                chars.next(); // consume ']'
-                // Skip until we hit BEL (\x07) or ST (ESC \)
+                chars.next();
                 while let Some(&next) = chars.peek() {
                     if next == '\x07' {
                         chars.next();
@@ -403,12 +626,13 @@ fn strip_ansi_codes(s: &str) -> String {
     result
 }
 
-fn get_log_content(info: &ResultInfo) -> String {
+fn get_log_content_string(info: &ResultInfo) -> String {
     let mut content = String::new();
 
     // Header
     let emoji = get_agent_emoji(&info.executor_name);
     let status = if info.success { "Success" } else { "Failed" };
+
     content.push_str(&format!(
         "{} {} - {}\n",
         emoji,
@@ -422,6 +646,7 @@ fn get_log_content(info: &ResultInfo) -> String {
     // Summary
     content.push_str("Summary:\n");
     content.push_str(&format!("  Files changed: {}\n", info.files_changed));
+
     if let Some(ref summary) = info.change_summary {
         if summary.files_added > 0 {
             content.push_str(&format!("  + {} added\n", summary.files_added));
@@ -435,12 +660,13 @@ fn get_log_content(info: &ResultInfo) -> String {
     }
     content.push('\n');
 
-    // STDOUT (with ANSI codes stripped)
+    // STDOUT
     content.push_str(&"-".repeat(50));
     content.push('\n');
     content.push_str("STDOUT:\n");
     content.push_str(&"-".repeat(50));
     content.push('\n');
+
     if info.stdout.is_empty() {
         content.push_str("(no output)\n");
     } else {
@@ -452,13 +678,14 @@ fn get_log_content(info: &ResultInfo) -> String {
     }
     content.push('\n');
 
-    // STDERR (with ANSI codes stripped)
+    // STDERR
     if !info.stderr.is_empty() {
         content.push_str(&"-".repeat(50));
         content.push('\n');
         content.push_str("STDERR:\n");
         content.push_str(&"-".repeat(50));
         content.push('\n');
+
         let cleaned_stderr = strip_ansi_codes(&info.stderr);
         content.push_str(&cleaned_stderr);
         if !cleaned_stderr.ends_with('\n') {
@@ -469,9 +696,7 @@ fn get_log_content(info: &ResultInfo) -> String {
     content
 }
 
-/// Parse diff output and return a styled string with colors
-fn get_diff_content_styled(worktree_path: &Path) -> StyledString {
-    // Get diff from the worktree
+fn get_diff_content_string(worktree_path: &Path) -> String {
     let diff_output = Command::new("git")
         .args(["diff", "HEAD"])
         .current_dir(worktree_path)
@@ -481,57 +706,16 @@ fn get_diff_content_styled(worktree_path: &Path) -> StyledString {
         Ok(output) => {
             let diff_str = String::from_utf8_lossy(&output.stdout);
             if diff_str.is_empty() {
-                // Try to get status for untracked files
-                get_untracked_files_styled(worktree_path)
+                get_untracked_files_string(worktree_path)
             } else {
-                // Parse and colorize the diff
-                colorize_diff(&diff_str)
+                diff_str.to_string()
             }
         }
-        Err(e) => StyledString::plain(format!("Error getting diff: {}", e)),
+        Err(e) => format!("Error getting diff: {}", e),
     }
 }
 
-/// Colorize diff output with appropriate colors
-fn colorize_diff(diff: &str) -> StyledString {
-    let mut styled = StyledString::new();
-
-    let green = Style::from(Color::Dark(BaseColor::Green));
-    let red = Style::from(Color::Dark(BaseColor::Red));
-    let cyan = Style::from(Color::Dark(BaseColor::Cyan));
-    let yellow = Style::from(Color::Dark(BaseColor::Yellow));
-
-    for line in diff.lines() {
-        if line.starts_with("+++") || line.starts_with("---") {
-            // File headers - yellow/bold
-            styled.append_styled(line, yellow);
-        } else if line.starts_with('+') {
-            // Added lines - green
-            styled.append_styled(line, green);
-        } else if line.starts_with('-') {
-            // Removed lines - red
-            styled.append_styled(line, red);
-        } else if line.starts_with("@@") {
-            // Hunk headers - cyan
-            styled.append_styled(line, cyan);
-        } else if line.starts_with("diff ") {
-            // Diff command line - cyan
-            styled.append_styled(line, cyan);
-        } else if line.starts_with("index ") {
-            // Index line - cyan
-            styled.append_styled(line, cyan);
-        } else {
-            // Context lines - default color
-            styled.append_plain(line);
-        }
-        styled.append_plain("\n");
-    }
-
-    styled
-}
-
-/// Get styled content for untracked files
-fn get_untracked_files_styled(worktree_path: &Path) -> StyledString {
+fn get_untracked_files_string(worktree_path: &Path) -> String {
     let status_output = Command::new("git")
         .args(["status", "--porcelain"])
         .current_dir(worktree_path)
@@ -541,13 +725,10 @@ fn get_untracked_files_styled(worktree_path: &Path) -> StyledString {
         Ok(status) => {
             let status_str = String::from_utf8_lossy(&status.stdout);
             if status_str.is_empty() {
-                StyledString::plain("No changes detected.")
+                "No changes detected.".to_string()
             } else {
-                let mut styled = StyledString::new();
-                let green = Style::from(Color::Dark(BaseColor::Green));
-                let cyan = Style::from(Color::Dark(BaseColor::Cyan));
-
-                styled.append_styled("New/Untracked files:\n\n", cyan);
+                let mut content = String::new();
+                content.push_str("New/Untracked files:\n\n");
 
                 for line in status_str.lines() {
                     if line.starts_with("??") || line.starts_with("A ") {
@@ -555,27 +736,129 @@ fn get_untracked_files_styled(worktree_path: &Path) -> StyledString {
                         let file_path = worktree_path.join(file);
 
                         if file_path.exists() && file_path.is_file() {
-                            styled.append_styled(format!("+ {}\n", file), green);
-                            styled.append_plain("-".repeat(40));
-                            styled.append_plain("\n");
+                            content.push_str(&format!("+ {}\n", file));
+                            content.push_str(&"-".repeat(40));
+                            content.push('\n');
 
                             if let Ok(file_content) = std::fs::read_to_string(&file_path) {
                                 for (i, file_line) in file_content.lines().enumerate().take(100) {
-                                    styled.append_plain(format!("{:4} | ", i + 1));
-                                    styled.append_styled(format!("+{}\n", file_line), green);
+                                    content.push_str(&format!("{:4} | +{}\n", i + 1, file_line));
                                 }
                                 if file_content.lines().count() > 100 {
-                                    styled.append_plain("... (truncated)\n");
+                                    content.push_str("... (truncated)\n");
                                 }
                             }
-                            styled.append_plain("\n");
+                            content.push('\n');
                         }
                     }
                 }
-                styled
+                content
             }
         }
-        Err(e) => StyledString::plain(format!("Error getting status: {}", e)),
+        Err(e) => format!("Error getting status: {}", e),
+    }
+}
+
+fn get_styled_content(content: &str, mode: ViewMode) -> Text<'static> {
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let styled_line = match mode {
+            ViewMode::Log => style_log_line(line),
+            ViewMode::Diff => style_diff_line(line),
+        };
+        lines.push(styled_line);
+    }
+
+    Text::from(lines)
+}
+
+fn get_styled_content_with_search(content: &str, mode: ViewMode, query: &str) -> Text<'static> {
+    let mut lines = Vec::new();
+    let query_lower = query.to_lowercase();
+
+    for line in content.lines() {
+        let line_lower = line.to_lowercase();
+        if line_lower.contains(&query_lower) {
+            // Highlight search matches
+            let mut spans = Vec::new();
+            let mut last_end = 0;
+
+            for (start, _) in line_lower.match_indices(&query_lower) {
+                if start > last_end {
+                    spans.push(Span::raw(line[last_end..start].to_string()));
+                }
+                spans.push(Span::styled(
+                    line[start..start + query.len()].to_string(),
+                    Style::new()
+                        .fg(Color::Black)
+                        .bg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ));
+                last_end = start + query.len();
+            }
+
+            if last_end < line.len() {
+                spans.push(Span::raw(line[last_end..].to_string()));
+            }
+
+            lines.push(Line::from(spans));
+        } else {
+            let styled_line = match mode {
+                ViewMode::Log => style_log_line(line),
+                ViewMode::Diff => style_diff_line(line),
+            };
+            lines.push(styled_line);
+        }
+    }
+
+    Text::from(lines)
+}
+
+fn style_log_line(line: &str) -> Line<'static> {
+    if line.starts_with("STDOUT:") || line.starts_with("STDERR:") || line.starts_with("Summary:") {
+        Line::styled(line.to_string(), Style::new().add_modifier(Modifier::BOLD))
+    } else if line.starts_with("  +") {
+        Line::styled(line.to_string(), Style::new().fg(Color::Green))
+    } else if line.starts_with("  ~") {
+        Line::styled(line.to_string(), Style::new().fg(Color::Yellow))
+    } else if line.starts_with("  -") {
+        Line::styled(line.to_string(), Style::new().fg(Color::Red))
+    } else if line.starts_with('=') || line.starts_with('-') {
+        Line::styled(line.to_string(), Style::new().fg(Color::DarkGray))
+    } else if line.contains("Success") {
+        Line::styled(
+            line.to_string(),
+            Style::new().fg(Color::Green).add_modifier(Modifier::BOLD),
+        )
+    } else if line.contains("Failed") {
+        Line::styled(
+            line.to_string(),
+            Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )
+    } else if line == "(no output)" {
+        Line::styled(line.to_string(), Style::new().fg(Color::DarkGray))
+    } else {
+        Line::raw(line.to_string())
+    }
+}
+
+fn style_diff_line(line: &str) -> Line<'static> {
+    if line.starts_with("+++") || line.starts_with("---") {
+        Line::styled(line.to_string(), Style::new().fg(Color::Yellow))
+    } else if line.starts_with('+') {
+        Line::styled(line.to_string(), Style::new().fg(Color::Green))
+    } else if line.starts_with('-') {
+        Line::styled(line.to_string(), Style::new().fg(Color::Red))
+    } else if line.starts_with("@@") || line.starts_with("diff ") || line.starts_with("index ") {
+        Line::styled(line.to_string(), Style::new().fg(Color::Cyan))
+    } else if line.starts_with("New/Untracked") {
+        Line::styled(
+            line.to_string(),
+            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )
+    } else {
+        Line::raw(line.to_string())
     }
 }
 
@@ -594,15 +877,12 @@ mod tests {
 
     #[test]
     fn test_strip_ansi_codes() {
-        // Test basic ANSI codes
         assert_eq!(strip_ansi_codes("\x1b[31mred\x1b[0m"), "red");
         assert_eq!(
             strip_ansi_codes("\x1b[1;32mbold green\x1b[0m"),
             "bold green"
         );
-        // Test no ANSI codes
         assert_eq!(strip_ansi_codes("plain text"), "plain text");
-        // Test empty string
         assert_eq!(strip_ansi_codes(""), "");
     }
 
@@ -613,5 +893,123 @@ mod tests {
         assert_eq!(get_agent_emoji("gemini"), "\u{2728}");
         assert_eq!(get_agent_emoji("codex"), "\u{1F4E6}");
         assert_eq!(get_agent_emoji("unknown"), "\u{1F4BB}");
+    }
+
+    #[test]
+    fn test_app_navigation() {
+        use crate::git::ChangeSummary;
+        use std::path::PathBuf;
+
+        let result_infos = vec![
+            ResultInfo {
+                executor_name: "claude".to_string(),
+                success: true,
+                stdout: "output".to_string(),
+                stderr: "".to_string(),
+                files_changed: 1,
+                worktree_path: PathBuf::from("/tmp/test1"),
+                change_summary: Some(ChangeSummary {
+                    files_added: 1,
+                    files_modified: 0,
+                    files_deleted: 0,
+                    changed_files: vec!["test.rs".to_string()],
+                }),
+            },
+            ResultInfo {
+                executor_name: "gemini".to_string(),
+                success: true,
+                stdout: "output".to_string(),
+                stderr: "".to_string(),
+                files_changed: 2,
+                worktree_path: PathBuf::from("/tmp/test2"),
+                change_summary: None,
+            },
+        ];
+
+        let mut app = App::new(result_infos);
+        assert_eq!(app.selected_index(), 0);
+
+        app.next_model();
+        assert_eq!(app.selected_index(), 1);
+
+        app.next_model();
+        assert_eq!(app.selected_index(), 1); // Should stay at last
+
+        app.previous_model();
+        assert_eq!(app.selected_index(), 0);
+
+        app.previous_model();
+        assert_eq!(app.selected_index(), 0); // Should stay at first
+    }
+
+    #[test]
+    fn test_app_mode_switching() {
+        let mut app = App::new(vec![]);
+        assert_eq!(app.current_mode, ViewMode::Log);
+
+        app.set_mode(ViewMode::Diff);
+        assert_eq!(app.current_mode, ViewMode::Diff);
+
+        app.set_mode(ViewMode::Log);
+        assert_eq!(app.current_mode, ViewMode::Log);
+    }
+
+    #[test]
+    fn test_app_scrolling() {
+        let mut app = App::new(vec![]);
+        assert_eq!(app.scroll_offset, 0);
+
+        app.scroll_down(1);
+        assert_eq!(app.scroll_offset, 1);
+
+        app.scroll_up(1);
+        assert_eq!(app.scroll_offset, 0);
+
+        app.scroll_up(1);
+        assert_eq!(app.scroll_offset, 0); // Should not go negative
+
+        app.half_page_down(40);
+        assert_eq!(app.scroll_offset, 20);
+
+        app.half_page_up(40);
+        assert_eq!(app.scroll_offset, 0);
+    }
+
+    #[test]
+    fn test_app_focus_toggle() {
+        let mut app = App::new(vec![]);
+        assert_eq!(app.focused_panel, FocusedPanel::Models);
+
+        app.toggle_focus();
+        assert_eq!(app.focused_panel, FocusedPanel::Details);
+
+        app.toggle_focus();
+        assert_eq!(app.focused_panel, FocusedPanel::Models);
+    }
+
+    #[test]
+    fn test_app_search() {
+        let mut app = App::new(vec![]);
+        let content = "line one\nline two\nline three\nline one again";
+
+        app.search_query = "one".to_string();
+        app.execute_search(content);
+
+        assert_eq!(app.search_matches.len(), 2);
+        assert_eq!(app.search_matches[0], 0);
+        assert_eq!(app.search_matches[1], 3);
+        assert_eq!(app.scroll_offset, 0);
+
+        app.next_search_match();
+        assert_eq!(app.search_match_index, 1);
+        assert_eq!(app.scroll_offset, 3);
+
+        app.next_search_match();
+        assert_eq!(app.search_match_index, 0); // Wrap around
+        assert_eq!(app.scroll_offset, 0);
+
+        app.previous_search_match();
+        assert_eq!(app.search_match_index, 1); // Wrap around backwards
+        assert_eq!(app.scroll_offset, 3);
     }
 }
