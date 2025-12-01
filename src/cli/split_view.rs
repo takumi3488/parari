@@ -658,6 +658,8 @@ fn render_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 Span::raw(" Log  "),
                 Span::styled(" d ", Style::new().fg(Color::Black).bg(Color::Cyan)),
                 Span::raw(" Diff  "),
+                Span::styled(" a ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+                Span::raw(" Apply  "),
                 Span::styled(" q ", Style::new().fg(Color::Black).bg(Color::Cyan)),
                 Span::raw(" Quit"),
             ],
