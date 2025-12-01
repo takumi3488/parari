@@ -33,6 +33,7 @@ enum InputMode {
     Normal,
     Search,
     Confirm,
+    ConfirmCancel,
 }
 
 /// Result from the split view selection
@@ -233,6 +234,10 @@ impl App {
         self.input_mode = InputMode::Normal;
     }
 
+    fn start_confirm_cancel(&mut self) {
+        self.input_mode = InputMode::ConfirmCancel;
+    }
+
     fn cancel(&mut self) {
         self.result = Some(SplitViewResult::Cancel);
     }
@@ -248,6 +253,19 @@ impl App {
                     match key.code {
                         KeyCode::Char('y') | KeyCode::Char('Y') => {
                             self.apply();
+                            return true;
+                        }
+                        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                            self.cancel_confirm();
+                        }
+                        _ => {}
+                    }
+                    return false;
+                }
+                InputMode::ConfirmCancel => {
+                    match key.code {
+                        KeyCode::Char('y') | KeyCode::Char('Y') => {
+                            self.cancel();
                             return true;
                         }
                         KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
@@ -297,8 +315,7 @@ impl App {
                                     self.start_confirm();
                                 }
                                 KeyCode::Char('q') | KeyCode::Esc => {
-                                    self.cancel();
-                                    return true;
+                                    self.start_confirm_cancel();
                                 }
 
                                 _ => {}
@@ -362,8 +379,7 @@ impl App {
                                     self.start_confirm();
                                 }
                                 KeyCode::Char('q') | KeyCode::Esc => {
-                                    self.cancel();
-                                    return true;
+                                    self.start_confirm_cancel();
                                 }
 
                                 _ => {}
@@ -586,6 +602,18 @@ fn render_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             vec![
                 Span::styled(
                     format!(" Apply changes from {}? ", name),
+                    Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" y ", Style::new().fg(Color::Black).bg(Color::Green)),
+                Span::raw(" Yes  "),
+                Span::styled(" n/Esc ", Style::new().fg(Color::Black).bg(Color::Red)),
+                Span::raw(" No"),
+            ]
+        }
+        InputMode::ConfirmCancel => {
+            vec![
+                Span::styled(
+                    " Quit without applying changes? ",
                     Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(" y ", Style::new().fg(Color::Black).bg(Color::Green)),
