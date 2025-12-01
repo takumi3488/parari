@@ -346,8 +346,15 @@ impl App {
                                     self.toggle_focus()
                                 }
 
-                                // Mode switching
-                                KeyCode::Char('L') => self.set_mode(ViewMode::Log),
+                                // Mode switching (lowercase and uppercase)
+                                KeyCode::Char('l') | KeyCode::Char('L') => {
+                                    self.set_mode(ViewMode::Log)
+                                }
+                                KeyCode::Char('d')
+                                    if !key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                                {
+                                    self.set_mode(ViewMode::Diff)
+                                }
                                 KeyCode::Char('D') => self.set_mode(ViewMode::Diff),
 
                                 // Actions (also available in detail view)
@@ -613,12 +620,14 @@ fn render_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             FocusedPanel::Details => vec![
                 Span::styled(" j/k ", Style::new().fg(Color::Black).bg(Color::Cyan)),
                 Span::raw(" Scroll  "),
-                Span::styled(" g/G ", Style::new().fg(Color::Black).bg(Color::Cyan)),
-                Span::raw(" Top/Bottom  "),
                 Span::styled(" / ", Style::new().fg(Color::Black).bg(Color::Cyan)),
                 Span::raw(" Search  "),
                 Span::styled(" n/N ", Style::new().fg(Color::Black).bg(Color::Cyan)),
                 Span::raw(" Next/Prev  "),
+                Span::styled(" l ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+                Span::raw(" Log  "),
+                Span::styled(" d ", Style::new().fg(Color::Black).bg(Color::Cyan)),
+                Span::raw(" Diff  "),
                 Span::styled(" Tab/h ", Style::new().fg(Color::Black).bg(Color::Cyan)),
                 Span::raw(" Models  "),
                 Span::styled(" q ", Style::new().fg(Color::Black).bg(Color::Cyan)),
