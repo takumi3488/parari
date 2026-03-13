@@ -29,12 +29,17 @@ pub struct TaskRunner {
 
 impl TaskRunner {
     /// Create a new task runner for the given repository
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the path is not a git repository.
     pub async fn new(repo_path: impl AsRef<Path>) -> Result<Self> {
         let worktree_manager = WorktreeManager::new(repo_path).await?;
         Ok(Self { worktree_manager })
     }
 
     /// Get reference to worktree manager
+    #[must_use]
     pub fn worktree_manager(&self) -> &WorktreeManager {
         &self.worktree_manager
     }
@@ -47,6 +52,10 @@ impl TaskRunner {
     /// Run the task with the given executors in parallel
     ///
     /// Returns results from all executors that completed successfully
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no executors are available or worktree creation fails.
     pub async fn run(
         &mut self,
         prompt: &str,
@@ -58,6 +67,10 @@ impl TaskRunner {
     /// Run the task with the given executors in parallel with progress tracking
     ///
     /// Returns results from all executors that completed successfully
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no executors are available or worktree creation fails.
     pub async fn run_with_progress(
         &mut self,
         prompt: &str,
@@ -86,59 +99,51 @@ impl TaskRunner {
         let repo_path = self.worktree_manager.repo_path().to_path_buf();
         let futures: Vec<_> = available_executors
             .iter()
-            .map(|executor| {
+            .filter_map(|executor| {
                 let executor = Arc::clone(executor);
-                let worktree = self
-                    .worktree_manager
-                    .get_worktree(executor.name())
-                    .expect("Worktree should exist")
-                    .clone();
+                let worktree = self.worktree_manager.get_worktree(executor.name())?.clone();
                 let prompt = prompt.to_string();
                 let repo_path = repo_path.clone();
                 let progress = progress.clone();
 
-                async move {
+                Some(async move {
                     let executor_name = executor.name().to_string();
 
                     // Update progress: Running
                     if let Some(ref p) = progress {
-                        p.update_status(&executor_name, AgentStatus::Running);
+                        p.update_status(&executor_name, &AgentStatus::Running);
                     }
 
                     let result = executor.execute(&prompt, &worktree.path).await;
 
-                    match result {
-                        Ok(execution) => {
-                            // Get change summary
-                            let change_summary =
-                                git::get_change_summary(&repo_path, &worktree.path)
-                                    .await
-                                    .ok();
+                    if let Ok(execution) = result {
+                        // Get change summary
+                        let change_summary = git::get_change_summary(&repo_path, &worktree.path)
+                            .await
+                            .ok();
 
-                            // Update progress based on execution success
-                            if let Some(ref p) = progress {
-                                if execution.success {
-                                    p.update_status(&executor_name, AgentStatus::Completed);
-                                } else {
-                                    p.update_status(&executor_name, AgentStatus::Failed);
-                                }
+                        // Update progress based on execution success
+                        if let Some(ref p) = progress {
+                            if execution.success {
+                                p.update_status(&executor_name, &AgentStatus::Completed);
+                            } else {
+                                p.update_status(&executor_name, &AgentStatus::Failed);
                             }
+                        }
 
-                            Some(TaskResult {
-                                execution,
-                                worktree_path: worktree.path,
-                                change_summary,
-                            })
+                        Some(TaskResult {
+                            execution,
+                            worktree_path: worktree.path,
+                            change_summary,
+                        })
+                    } else {
+                        // Update progress: Failed
+                        if let Some(ref p) = progress {
+                            p.update_status(&executor_name, &AgentStatus::Failed);
                         }
-                        Err(_) => {
-                            // Update progress: Failed
-                            if let Some(ref p) = progress {
-                                p.update_status(&executor_name, AgentStatus::Failed);
-                            }
-                            None
-                        }
+                        None
                     }
-                }
+                })
             })
             .collect();
 
@@ -153,6 +158,10 @@ impl TaskRunner {
     }
 
     /// Cleanup worktrees
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the cleanup fails.
     pub async fn cleanup(&mut self) -> Result<()> {
         self.worktree_manager.cleanup().await
     }
@@ -164,21 +173,24 @@ mod tests {
     use crate::executor::mock::MockExecutor;
 
     #[tokio::test]
-    async fn test_task_runner_creation() {
-        let cwd = std::env::current_dir().unwrap();
+    async fn test_task_runner_creation() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let cwd = std::env::current_dir()?;
         let runner = TaskRunner::new(&cwd).await;
         assert!(runner.is_ok());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_task_runner_no_executors() {
-        let cwd = std::env::current_dir().unwrap();
-        let mut runner = TaskRunner::new(&cwd).await.unwrap();
+    async fn test_task_runner_no_executors() -> std::result::Result<(), Box<dyn std::error::Error>>
+    {
+        let cwd = std::env::current_dir()?;
+        let mut runner = TaskRunner::new(&cwd).await?;
 
         let executors: Vec<Arc<dyn Executor>> =
             vec![Arc::new(MockExecutor::new("test").with_available(false))];
 
         let result = runner.run("test prompt", executors).await;
         assert!(matches!(result, Err(Error::NoExecutorsAvailable)));
+        Ok(())
     }
 }

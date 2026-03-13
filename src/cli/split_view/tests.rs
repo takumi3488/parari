@@ -36,7 +36,7 @@ fn test_app_navigation() {
             executor_name: "claude".to_string(),
             success: true,
             stdout: "output".to_string(),
-            stderr: "".to_string(),
+            stderr: String::new(),
             output_lines: vec![OutputLine::Stdout("output".to_string())],
             files_changed: 1,
             worktree_path: PathBuf::from("/tmp/test1"),
@@ -51,7 +51,7 @@ fn test_app_navigation() {
             executor_name: "gemini".to_string(),
             success: true,
             stdout: "output".to_string(),
-            stderr: "".to_string(),
+            stderr: String::new(),
             output_lines: vec![OutputLine::Stdout("output".to_string())],
             files_changed: 2,
             worktree_path: PathBuf::from("/tmp/test2"),
@@ -160,7 +160,7 @@ mod snapshot_tests {
                 executor_name: "claude".to_string(),
                 success: true,
                 stdout: "Analyzing the code...\nMade changes to src/main.rs".to_string(),
-                stderr: "".to_string(),
+                stderr: String::new(),
                 output_lines: vec![
                     OutputLine::Stdout("Analyzing the code...".to_string()),
                     OutputLine::Stdout("Made changes to src/main.rs".to_string()),
@@ -178,7 +178,7 @@ mod snapshot_tests {
                 executor_name: "gemini".to_string(),
                 success: true,
                 stdout: "Processing request...\nUpdated 3 files".to_string(),
-                stderr: "".to_string(),
+                stderr: String::new(),
                 output_lines: vec![
                     OutputLine::Stdout("Processing request...".to_string()),
                     OutputLine::Stdout("Updated 3 files".to_string()),
@@ -213,7 +213,7 @@ mod snapshot_tests {
     }
 
     #[test]
-    fn test_render_split_view_log_mode() {
+    fn test_render_split_view_log_mode() -> Result<(), Box<dyn std::error::Error>> {
         let result_infos = create_test_result_infos();
         let mut app = App::new(result_infos);
         let content = app
@@ -221,32 +221,30 @@ mod snapshot_tests {
             .map(get_log_content_string)
             .unwrap_or_default();
 
-        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
-        terminal
-            .draw(|frame| render(frame, &mut app, &content))
-            .unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(100, 30))?;
+        terminal.draw(|frame| render(frame, &mut app, &content))?;
 
         assert_snapshot!(terminal.backend());
+        Ok(())
     }
 
     #[test]
-    fn test_render_split_view_diff_mode() {
+    fn test_render_split_view_diff_mode() -> Result<(), Box<dyn std::error::Error>> {
         let result_infos = create_test_result_infos();
         let mut app = App::new(result_infos);
         app.set_mode(ViewMode::Diff);
         // Simulate diff content
         let content = "+++ b/src/main.rs\n--- a/src/main.rs\n@@ -1,3 +1,5 @@\n fn main() {\n+    println!(\"Hello\");\n     run();\n }";
 
-        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
-        terminal
-            .draw(|frame| render(frame, &mut app, content))
-            .unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(100, 30))?;
+        terminal.draw(|frame| render(frame, &mut app, content))?;
 
         assert_snapshot!(terminal.backend());
+        Ok(())
     }
 
     #[test]
-    fn test_render_split_view_focused_on_details() {
+    fn test_render_split_view_focused_on_details() -> Result<(), Box<dyn std::error::Error>> {
         let result_infos = create_test_result_infos();
         let mut app = App::new(result_infos);
         app.toggle_focus(); // Focus on details panel
@@ -255,16 +253,15 @@ mod snapshot_tests {
             .map(get_log_content_string)
             .unwrap_or_default();
 
-        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
-        terminal
-            .draw(|frame| render(frame, &mut app, &content))
-            .unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(100, 30))?;
+        terminal.draw(|frame| render(frame, &mut app, &content))?;
 
         assert_snapshot!(terminal.backend());
+        Ok(())
     }
 
     #[test]
-    fn test_render_split_view_search_mode() {
+    fn test_render_split_view_search_mode() -> Result<(), Box<dyn std::error::Error>> {
         let result_infos = create_test_result_infos();
         let mut app = App::new(result_infos);
         app.input_mode = InputMode::Search;
@@ -274,16 +271,15 @@ mod snapshot_tests {
             .map(get_log_content_string)
             .unwrap_or_default();
 
-        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
-        terminal
-            .draw(|frame| render(frame, &mut app, &content))
-            .unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(100, 30))?;
+        terminal.draw(|frame| render(frame, &mut app, &content))?;
 
         assert_snapshot!(terminal.backend());
+        Ok(())
     }
 
     #[test]
-    fn test_render_split_view_second_model_selected() {
+    fn test_render_split_view_second_model_selected() -> Result<(), Box<dyn std::error::Error>> {
         let result_infos = create_test_result_infos();
         let mut app = App::new(result_infos);
         app.next_model(); // Select gemini
@@ -292,16 +288,15 @@ mod snapshot_tests {
             .map(get_log_content_string)
             .unwrap_or_default();
 
-        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
-        terminal
-            .draw(|frame| render(frame, &mut app, &content))
-            .unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(100, 30))?;
+        terminal.draw(|frame| render(frame, &mut app, &content))?;
 
         assert_snapshot!(terminal.backend());
+        Ok(())
     }
 
     #[test]
-    fn test_render_split_view_failed_model_selected() {
+    fn test_render_split_view_failed_model_selected() -> Result<(), Box<dyn std::error::Error>> {
         let result_infos = create_test_result_infos();
         let mut app = App::new(result_infos);
         app.next_model(); // Select gemini
@@ -311,29 +306,27 @@ mod snapshot_tests {
             .map(get_log_content_string)
             .unwrap_or_default();
 
-        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
-        terminal
-            .draw(|frame| render(frame, &mut app, &content))
-            .unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(100, 30))?;
+        terminal.draw(|frame| render(frame, &mut app, &content))?;
 
         assert_snapshot!(terminal.backend());
+        Ok(())
     }
 
     #[test]
-    fn test_render_split_view_empty_results() {
+    fn test_render_split_view_empty_results() -> Result<(), Box<dyn std::error::Error>> {
         let mut app = App::new(vec![]);
         let content = "";
 
-        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
-        terminal
-            .draw(|frame| render(frame, &mut app, content))
-            .unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(100, 30))?;
+        terminal.draw(|frame| render(frame, &mut app, content))?;
 
         assert_snapshot!(terminal.backend());
+        Ok(())
     }
 
     #[test]
-    fn test_render_split_view_confirm_mode() {
+    fn test_render_split_view_confirm_mode() -> Result<(), Box<dyn std::error::Error>> {
         let result_infos = create_test_result_infos();
         let mut app = App::new(result_infos);
         app.input_mode = InputMode::Confirm;
@@ -342,11 +335,10 @@ mod snapshot_tests {
             .map(get_log_content_string)
             .unwrap_or_default();
 
-        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
-        terminal
-            .draw(|frame| render(frame, &mut app, &content))
-            .unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(100, 30))?;
+        terminal.draw(|frame| render(frame, &mut app, &content))?;
 
         assert_snapshot!(terminal.backend());
+        Ok(())
     }
 }

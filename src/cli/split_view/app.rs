@@ -153,7 +153,7 @@ impl App {
 
         for (line_num, line) in content.lines().enumerate() {
             if line.to_lowercase().contains(&query_lower) {
-                self.search_matches.push(line_num as u16);
+                let _ = u16::try_from(line_num).map(|n| self.search_matches.push(n));
             }
         }
 
@@ -203,153 +203,174 @@ impl App {
         self.result = Some(SplitViewResult::Cancel);
     }
 
-    pub fn handle_event(&mut self, event: Event, viewport_height: u16, content: &str) -> bool {
+    pub fn handle_event(&mut self, event: &Event, viewport_height: u16, content: &str) -> bool {
         if let Event::Key(key) = event {
             if key.kind != KeyEventKind::Press {
                 return false;
             }
-
-            match self.input_mode {
-                InputMode::Confirm => {
-                    match key.code {
-                        KeyCode::Char('y') | KeyCode::Char('Y') => {
-                            self.apply();
-                            return true;
-                        }
-                        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                            self.cancel_confirm();
-                        }
-                        _ => {}
-                    }
-                    return false;
-                }
-                InputMode::ConfirmCancel => {
-                    match key.code {
-                        KeyCode::Char('y') | KeyCode::Char('Y') => {
-                            self.cancel();
-                            return true;
-                        }
-                        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                            self.cancel_confirm();
-                        }
-                        _ => {}
-                    }
-                    return false;
-                }
-                InputMode::Search => {
-                    match key.code {
-                        KeyCode::Enter => {
-                            self.execute_search(content);
-                        }
-                        KeyCode::Esc => {
-                            self.cancel_search();
-                        }
-                        KeyCode::Backspace => {
-                            self.search_query.pop();
-                        }
-                        KeyCode::Char(c) => {
-                            self.search_query.push(c);
-                        }
-                        _ => {}
-                    }
-                    return false;
-                }
-                InputMode::Normal => {
-                    match self.focused_panel {
-                        FocusedPanel::Models => {
-                            match key.code {
-                                // Model navigation
-                                KeyCode::Char('j') | KeyCode::Down => self.next_model(),
-                                KeyCode::Char('k') | KeyCode::Up => self.previous_model(),
-
-                                // Focus switch
-                                KeyCode::Tab | KeyCode::Char('l') | KeyCode::Right => {
-                                    self.toggle_focus()
-                                }
-
-                                // Mode switching
-                                KeyCode::Char('L') => self.set_mode(ViewMode::Log),
-                                KeyCode::Char('D') => self.set_mode(ViewMode::Diff),
-
-                                // Actions
-                                KeyCode::Char('a') | KeyCode::Enter => {
-                                    self.start_confirm();
-                                }
-                                KeyCode::Char('q') | KeyCode::Esc => {
-                                    self.start_confirm_cancel();
-                                }
-
-                                _ => {}
-                            }
-                        }
-                        FocusedPanel::Details => {
-                            match key.code {
-                                // Vim-style scrolling
-                                KeyCode::Char('j') | KeyCode::Down => self.scroll_down(1),
-                                KeyCode::Char('k') | KeyCode::Up => self.scroll_up(1),
-                                KeyCode::Char('d')
-                                    if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                                {
-                                    self.half_page_down(viewport_height)
-                                }
-                                KeyCode::Char('u')
-                                    if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                                {
-                                    self.half_page_up(viewport_height)
-                                }
-                                KeyCode::Char('f')
-                                    if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                                {
-                                    self.scroll_down(viewport_height)
-                                }
-                                KeyCode::Char('b')
-                                    if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                                {
-                                    self.scroll_up(viewport_height)
-                                }
-                                KeyCode::Char('g') => self.scroll_to_top(),
-                                KeyCode::Char('G') => self.scroll_to_bottom(),
-                                KeyCode::Home => self.scroll_to_top(),
-                                KeyCode::End => self.scroll_to_bottom(),
-                                KeyCode::PageDown => self.scroll_down(viewport_height),
-                                KeyCode::PageUp => self.scroll_up(viewport_height),
-
-                                // Search
-                                KeyCode::Char('/') => self.start_search(),
-                                KeyCode::Char('n') => self.next_search_match(),
-                                KeyCode::Char('N') => self.previous_search_match(),
-
-                                // Focus switch
-                                KeyCode::Tab | KeyCode::Char('h') | KeyCode::Left => {
-                                    self.toggle_focus()
-                                }
-
-                                // Mode switching (lowercase and uppercase)
-                                KeyCode::Char('l') | KeyCode::Char('L') => {
-                                    self.set_mode(ViewMode::Log)
-                                }
-                                KeyCode::Char('d')
-                                    if !key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                                {
-                                    self.set_mode(ViewMode::Diff)
-                                }
-                                KeyCode::Char('D') => self.set_mode(ViewMode::Diff),
-
-                                // Actions (also available in detail view)
-                                KeyCode::Char('a') => {
-                                    self.start_confirm();
-                                }
-                                KeyCode::Char('q') | KeyCode::Esc => {
-                                    self.start_confirm_cancel();
-                                }
-
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-            }
+            return self.handle_key_event(*key, viewport_height, content);
         }
         false
+    }
+
+    fn handle_key_event(
+        &mut self,
+        key: ratatui::crossterm::event::KeyEvent,
+        viewport_height: u16,
+        content: &str,
+    ) -> bool {
+        match self.input_mode {
+            InputMode::Confirm => self.handle_confirm_key(key),
+            InputMode::ConfirmCancel => self.handle_confirm_cancel_key(key),
+            InputMode::Search => {
+                self.handle_search_key(key, content);
+                false
+            }
+            InputMode::Normal => {
+                self.handle_normal_key(key, viewport_height);
+                false
+            }
+        }
+    }
+
+    fn handle_confirm_key(&mut self, key: ratatui::crossterm::event::KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('y' | 'Y') => {
+                self.apply();
+                true
+            }
+            KeyCode::Char('n' | 'N') | KeyCode::Esc => {
+                self.cancel_confirm();
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_confirm_cancel_key(&mut self, key: ratatui::crossterm::event::KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('y' | 'Y') => {
+                self.cancel();
+                true
+            }
+            KeyCode::Char('n' | 'N') | KeyCode::Esc => {
+                self.cancel_confirm();
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_search_key(&mut self, key: ratatui::crossterm::event::KeyEvent, content: &str) {
+        match key.code {
+            KeyCode::Enter => {
+                self.execute_search(content);
+            }
+            KeyCode::Esc => {
+                self.cancel_search();
+            }
+            KeyCode::Backspace => {
+                self.search_query.pop();
+            }
+            KeyCode::Char(c) => {
+                self.search_query.push(c);
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_normal_key(
+        &mut self,
+        key: ratatui::crossterm::event::KeyEvent,
+        viewport_height: u16,
+    ) {
+        match self.focused_panel {
+            FocusedPanel::Models => self.handle_models_panel_key(key),
+            FocusedPanel::Details => self.handle_details_panel_key(key, viewport_height),
+        }
+    }
+
+    fn handle_models_panel_key(&mut self, key: ratatui::crossterm::event::KeyEvent) {
+        match key.code {
+            // Model navigation
+            KeyCode::Char('j') | KeyCode::Down => self.next_model(),
+            KeyCode::Char('k') | KeyCode::Up => self.previous_model(),
+
+            // Focus switch
+            KeyCode::Tab | KeyCode::Char('l') | KeyCode::Right => {
+                self.toggle_focus();
+            }
+
+            // Mode switching
+            KeyCode::Char('L') => self.set_mode(ViewMode::Log),
+            KeyCode::Char('D') => self.set_mode(ViewMode::Diff),
+
+            // Actions
+            KeyCode::Char('a') | KeyCode::Enter => {
+                self.start_confirm();
+            }
+            KeyCode::Char('q') | KeyCode::Esc => {
+                self.start_confirm_cancel();
+            }
+
+            _ => {}
+        }
+    }
+
+    fn handle_details_panel_key(
+        &mut self,
+        key: ratatui::crossterm::event::KeyEvent,
+        viewport_height: u16,
+    ) {
+        match key.code {
+            // Vim-style scrolling
+            KeyCode::Char('j') | KeyCode::Down => self.scroll_down(1),
+            KeyCode::Char('k') | KeyCode::Up => self.scroll_up(1),
+            KeyCode::Char('d') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                self.half_page_down(viewport_height);
+            }
+            KeyCode::Char('u') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                self.half_page_up(viewport_height);
+            }
+            KeyCode::Char('f') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                self.scroll_down(viewport_height);
+            }
+            KeyCode::Char('b') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                self.scroll_up(viewport_height);
+            }
+            KeyCode::Char('g') | KeyCode::Home => self.scroll_to_top(),
+            KeyCode::Char('G') | KeyCode::End => self.scroll_to_bottom(),
+            KeyCode::PageDown => self.scroll_down(viewport_height),
+            KeyCode::PageUp => self.scroll_up(viewport_height),
+
+            // Search
+            KeyCode::Char('/') => self.start_search(),
+            KeyCode::Char('n') => self.next_search_match(),
+            KeyCode::Char('N') => self.previous_search_match(),
+
+            // Focus switch
+            KeyCode::Tab | KeyCode::Char('h') | KeyCode::Left => {
+                self.toggle_focus();
+            }
+
+            // Mode switching (lowercase and uppercase)
+            KeyCode::Char('l' | 'L') => {
+                self.set_mode(ViewMode::Log);
+            }
+            KeyCode::Char('d') if !key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                self.set_mode(ViewMode::Diff);
+            }
+            KeyCode::Char('D') => self.set_mode(ViewMode::Diff),
+
+            // Actions (also available in detail view)
+            KeyCode::Char('a') => {
+                self.start_confirm();
+            }
+            KeyCode::Char('q') | KeyCode::Esc => {
+                self.start_confirm_cancel();
+            }
+
+            _ => {}
+        }
     }
 }

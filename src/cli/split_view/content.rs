@@ -1,3 +1,4 @@
+use std::fmt::Write as FmtWrite;
 use std::path::Path;
 use std::process::Command;
 
@@ -8,7 +9,7 @@ use super::types::ViewMode;
 use crate::domain::ResultInfo;
 use crate::executor::OutputLine;
 
-/// Special marker for stderr lines (invisible character used for detection in style_log_line)
+/// Special marker for stderr lines (invisible character used for detection in `style_log_line`)
 pub const STDERR_MARKER: &str = "\x01STDERR\x02";
 
 /// Strip ANSI escape codes from a string
@@ -58,29 +59,30 @@ pub fn get_log_content_string(info: &ResultInfo) -> String {
     let emoji = get_agent_emoji(&info.executor_name);
     let status = if info.success { "Success" } else { "Failed" };
 
-    content.push_str(&format!(
-        "{} {} - {}\n",
+    let _ = writeln!(
+        content,
+        "{} {} - {}",
         emoji,
         info.executor_name.to_uppercase(),
         status
-    ));
+    );
     content.push_str(&"=".repeat(50));
     content.push('\n');
     content.push('\n');
 
     // Summary
     content.push_str("Summary:\n");
-    content.push_str(&format!("  Files changed: {}\n", info.files_changed));
+    let _ = writeln!(content, "  Files changed: {}", info.files_changed);
 
     if let Some(ref summary) = info.change_summary {
         if summary.files_added > 0 {
-            content.push_str(&format!("  + {} added\n", summary.files_added));
+            let _ = writeln!(content, "  + {} added", summary.files_added);
         }
         if summary.files_modified > 0 {
-            content.push_str(&format!("  ~ {} modified\n", summary.files_modified));
+            let _ = writeln!(content, "  ~ {} modified", summary.files_modified);
         }
         if summary.files_deleted > 0 {
-            content.push_str(&format!("  - {} deleted\n", summary.files_deleted));
+            let _ = writeln!(content, "  - {} deleted", summary.files_deleted);
         }
     }
     content.push('\n');
@@ -131,7 +133,7 @@ pub fn get_diff_content_string(worktree_path: &Path) -> String {
                 diff_str.to_string()
             }
         }
-        Err(e) => format!("Error getting diff: {}", e),
+        Err(e) => format!("Error getting diff: {e}"),
     }
 }
 
@@ -156,13 +158,13 @@ pub fn get_untracked_files_string(worktree_path: &Path) -> String {
                         let file_path = worktree_path.join(file);
 
                         if file_path.exists() && file_path.is_file() {
-                            content.push_str(&format!("+ {}\n", file));
+                            let _ = writeln!(content, "+ {file}");
                             content.push_str(&"-".repeat(40));
                             content.push('\n');
 
                             if let Ok(file_content) = std::fs::read_to_string(&file_path) {
                                 for (i, file_line) in file_content.lines().enumerate().take(100) {
-                                    content.push_str(&format!("{:4} | +{}\n", i + 1, file_line));
+                                    let _ = writeln!(content, "{:4} | +{file_line}", i + 1);
                                 }
                                 if file_content.lines().count() > 100 {
                                     content.push_str("... (truncated)\n");
@@ -175,7 +177,7 @@ pub fn get_untracked_files_string(worktree_path: &Path) -> String {
                 content
             }
         }
-        Err(e) => format!("Error getting status: {}", e),
+        Err(e) => format!("Error getting status: {e}"),
     }
 }
 

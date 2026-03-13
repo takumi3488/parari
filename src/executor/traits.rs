@@ -99,6 +99,14 @@ pub trait Executor: Send + Sync {
 ///
 /// This spawns the process with piped stdout/stderr and reads lines as they arrive,
 /// preserving the interleaved order.
+///
+/// # Errors
+///
+/// Returns an error if the process cannot be spawned or if reading from stdout/stderr fails.
+///
+/// # Panics
+///
+/// Panics if stdout or stderr are not available after spawning with `Stdio::piped()`.
 pub async fn execute_with_ordered_output(
     mut cmd: Command,
     executor_name: &str,
@@ -107,8 +115,14 @@ pub async fn execute_with_ordered_output(
 
     let mut child = cmd.spawn()?;
 
-    let stdout = child.stdout.take().expect("stdout should be piped");
-    let stderr = child.stderr.take().expect("stderr should be piped");
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| std::io::Error::other("stdout not available"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| std::io::Error::other("stderr not available"))?;
 
     let mut stdout_reader = BufReader::new(stdout).lines();
     let mut stderr_reader = BufReader::new(stderr).lines();

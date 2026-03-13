@@ -11,6 +11,7 @@ use crate::error::{Error, Result};
 pub struct GeminiExecutor;
 
 impl GeminiExecutor {
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
@@ -18,7 +19,7 @@ impl GeminiExecutor {
 
 #[async_trait]
 impl Executor for GeminiExecutor {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "gemini"
     }
 

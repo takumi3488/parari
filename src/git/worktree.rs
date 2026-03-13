@@ -27,6 +27,10 @@ pub async fn is_git_repository(path: &Path) -> bool {
 }
 
 /// Get the root of the git repository
+///
+/// # Errors
+///
+/// Returns an error if the path is not inside a git repository or the git command fails.
 pub async fn get_repo_root(path: &Path) -> Result<PathBuf> {
     let output = Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
@@ -48,22 +52,25 @@ pub async fn get_repo_root(path: &Path) -> Result<PathBuf> {
 ///
 /// Returns the path to the created worktree.
 /// This also copies uncommitted changes from the source repository to the worktree.
+///
+/// # Errors
+///
+/// Returns an error if the git command fails or file operations fail.
 pub async fn create_worktree(repo_path: &Path, executor_name: &str) -> Result<WorktreeInfo> {
     let timestamp = chrono::Utc::now().format("%Y%m%d%H%M%S%3f").to_string();
-    let worktree_name = format!("{}-{}", timestamp, executor_name);
+    let worktree_name = format!("{timestamp}-{executor_name}");
     let worktree_path = config::worktrees_dir().join(&worktree_name);
 
     // Ensure worktrees directory exists
     tokio::fs::create_dir_all(config::worktrees_dir()).await?;
 
+    let worktree_path_str = worktree_path.to_str().ok_or_else(|| Error::GitCommand {
+        message: "worktree path contains invalid UTF-8".to_string(),
+    })?;
+
     // Create the worktree
     let output = Command::new("git")
-        .args([
-            "worktree",
-            "add",
-            "--detach",
-            worktree_path.to_str().unwrap(),
-        ])
+        .args(["worktree", "add", "--detach", worktree_path_str])
         .current_dir(repo_path)
         .output()
         .await?;
@@ -185,15 +192,19 @@ async fn copy_dir_to_worktree(src: &Path, dst: &Path) -> Result<()> {
 }
 
 /// Remove a worktree
+///
+/// # Errors
+///
+/// Returns an error if file operations fail.
+///
+/// # Panics
+///
+/// Does not panic; invalid UTF-8 paths are handled gracefully by skipping the git command.
 pub async fn remove_worktree(repo_path: &Path, worktree_path: &Path) -> Result<()> {
     // First, try to remove with --force
+    let worktree_path_str = worktree_path.to_str().unwrap_or("");
     let output = Command::new("git")
-        .args([
-            "worktree",
-            "remove",
-            "--force",
-            worktree_path.to_str().unwrap(),
-        ])
+        .args(["worktree", "remove", "--force", worktree_path_str])
         .current_dir(repo_path)
         .output()
         .await?;
@@ -217,6 +228,10 @@ pub async fn remove_worktree(repo_path: &Path, worktree_path: &Path) -> Result<(
 }
 
 /// List all worktrees for a repository
+///
+/// # Errors
+///
+/// Returns an error if the git command fails.
 pub async fn list_worktrees(repo_path: &Path) -> Result<Vec<PathBuf>> {
     let output = Command::new("git")
         .args(["worktree", "list", "--porcelain"])
@@ -235,13 +250,17 @@ pub async fn list_worktrees(repo_path: &Path) -> Result<Vec<PathBuf>> {
     let worktrees: Vec<PathBuf> = stdout
         .lines()
         .filter(|line| line.starts_with("worktree "))
-        .map(|line| PathBuf::from(line.strip_prefix("worktree ").unwrap()))
+        .filter_map(|line| line.strip_prefix("worktree ").map(PathBuf::from))
         .collect();
 
     Ok(worktrees)
 }
 
-/// Remove old worktrees if there are more than MAX_WORKTREES
+/// Remove old worktrees if there are more than `MAX_WORKTREES`
+///
+/// # Errors
+///
+/// Returns an error if file system operations fail.
 pub async fn cleanup_old_worktrees(repo_path: &Path) -> Result<()> {
     let worktrees_dir = config::worktrees_dir();
 
@@ -257,7 +276,7 @@ pub async fn cleanup_old_worktrees(repo_path: &Path) -> Result<()> {
     }
 
     // Sort by name (which includes timestamp) - oldest first
-    entries.sort_by_key(|a| a.file_name());
+    entries.sort_by_key(tokio::fs::DirEntry::file_name);
 
     // Remove oldest if we exceed MAX_WORKTREES
     while entries.len() > config::MAX_WORKTREES {
@@ -274,6 +293,10 @@ pub async fn cleanup_old_worktrees(repo_path: &Path) -> Result<()> {
 }
 
 /// Remove all worktrees in the parari worktrees directory
+///
+/// # Errors
+///
+/// Returns an error if file system operations fail.
 pub async fn cleanup_all_worktrees(repo_path: &Path) -> Result<()> {
     let worktrees_dir = config::worktrees_dir();
 
@@ -304,10 +327,11 @@ mod tests {
     use std::env;
 
     #[tokio::test]
-    async fn test_is_git_repository() {
+    async fn test_is_git_repository() -> std::result::Result<(), Box<dyn std::error::Error>> {
         // Current directory should be a git repository
-        let cwd = env::current_dir().unwrap();
+        let cwd = env::current_dir()?;
         assert!(is_git_repository(&cwd).await);
+        Ok(())
     }
 
     #[tokio::test]

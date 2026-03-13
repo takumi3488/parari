@@ -2,16 +2,18 @@ use std::path::PathBuf;
 
 /// Base directory for parari data
 ///
-/// Returns `$HOME/.parari`
+/// Returns `$HOME/.parari`, or `/tmp/.parari` if the home directory cannot be determined.
+#[must_use]
 pub fn base_dir() -> PathBuf {
     dirs::home_dir()
-        .expect("Could not find home directory")
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
         .join(".parari")
 }
 
 /// Directory for storing worktrees
 ///
 /// Returns `$HOME/.parari/worktrees`
+#[must_use]
 pub fn worktrees_dir() -> PathBuf {
     base_dir().join("worktrees")
 }

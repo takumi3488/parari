@@ -11,6 +11,7 @@ use crate::error::{Error, Result};
 pub struct ClaudeExecutor;
 
 impl ClaudeExecutor {
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
@@ -18,7 +19,7 @@ impl ClaudeExecutor {
 
 #[async_trait]
 impl Executor for ClaudeExecutor {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "claude"
     }
 

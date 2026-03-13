@@ -8,6 +8,7 @@ use crate::domain::{ResultInfo, TaskResult};
 use crate::error::{Error, Result};
 
 /// Check if delta command is available
+#[must_use]
 pub fn is_delta_available() -> bool {
     Command::new("delta")
         .arg("--version")
@@ -18,6 +19,10 @@ pub fn is_delta_available() -> bool {
 }
 
 /// Show diff using delta for a worktree
+///
+/// # Errors
+///
+/// Returns an error if git commands fail.
 pub fn show_diff_with_delta(worktree_path: &Path) -> Result<()> {
     let use_delta = is_delta_available();
 
@@ -27,7 +32,7 @@ pub fn show_diff_with_delta(worktree_path: &Path) -> Result<()> {
         .current_dir(worktree_path)
         .output()
         .map_err(|e| Error::GitCommand {
-            message: format!("Failed to get diff: {}", e),
+            message: format!("Failed to get diff: {e}"),
         })?;
 
     let diff_str = String::from_utf8_lossy(&diff_output.stdout);
@@ -39,7 +44,7 @@ pub fn show_diff_with_delta(worktree_path: &Path) -> Result<()> {
             .current_dir(worktree_path)
             .output()
             .map_err(|e| Error::GitCommand {
-                message: format!("Failed to get status: {}", e),
+                message: format!("Failed to get status: {e}"),
             })?;
 
         let status_str = String::from_utf8_lossy(&status_output.stdout);
@@ -75,12 +80,12 @@ pub fn show_diff_with_delta(worktree_path: &Path) -> Result<()> {
                             .status();
                     } else {
                         // Fallback: show plain diff
-                        println!("  + {}", file);
+                        println!("  + {file}");
                         if let Ok(content) = std::fs::read_to_string(&file_path) {
                             println!("\n--- /dev/null");
-                            println!("+++ {}", file);
+                            println!("+++ {file}");
                             for line in content.lines().take(50) {
-                                println!("+{}", line);
+                                println!("+{line}");
                             }
                             if content.lines().count() > 50 {
                                 println!("... (truncated)");
@@ -109,12 +114,12 @@ pub fn show_diff_with_delta(worktree_path: &Path) -> Result<()> {
             .stderr(Stdio::inherit())
             .status()
             .map_err(|e| Error::GitCommand {
-                message: format!("Failed to run git diff with delta: {}", e),
+                message: format!("Failed to run git diff with delta: {e}"),
             })?;
     } else {
         // Fallback: show plain diff
         println!("\n(Tip: Install 'delta' for better diff output)");
-        println!("{}", diff_str);
+        println!("{diff_str}");
     }
 
     Ok(())
@@ -128,6 +133,10 @@ pub fn show_diff_with_delta(worktree_path: &Path) -> Result<()> {
 /// - Tab: switch between Output and Diff modes
 /// - 'a': apply the selected result
 /// - Esc/q: cancel
+///
+/// # Errors
+///
+/// Returns an error if no results are available or the user cancels.
 pub fn select_result(results: &[TaskResult], result_infos: &[ResultInfo]) -> Result<usize> {
     if results.is_empty() {
         return Err(Error::NoExecutorsAvailable);
@@ -178,19 +187,23 @@ pub fn show_error(error: &Error) {
 
 /// Display progress message
 pub fn show_progress(message: &str) {
-    println!("  {} {}", style("ℹ️").bold(), style(message).cyan());
+    println!("  {} {message}", style("ℹ️").bold());
 }
 
 /// Display waiting message while executors are running
 pub fn show_running_message(executor_names: &[&str]) {
     println!("\nRunning AI CLI tools in parallel:");
     for name in executor_names {
-        println!("  - {}", name);
+        println!("  - {name}");
     }
     println!("\nThis may take a while...\n");
 }
 
 /// Display warning about uncommitted changes and ask for confirmation
+///
+/// # Errors
+///
+/// Returns an error if stdin/stdout operations fail.
 pub fn confirm_overwrite_uncommitted(uncommitted_files: &[String]) -> Result<bool> {
     use crossterm::style::Stylize;
 
@@ -205,7 +218,8 @@ pub fn confirm_overwrite_uncommitted(uncommitted_files: &[String]) -> Result<boo
     }
 
     if uncommitted_files.len() > 10 {
-        println!("  ... and {} more files", uncommitted_files.len() - 10);
+        let remaining = uncommitted_files.len() - 10;
+        println!("  ... and {remaining} more files");
     }
 
     println!();
@@ -220,6 +234,10 @@ pub fn confirm_overwrite_uncommitted(uncommitted_files: &[String]) -> Result<boo
 }
 
 /// Display warning about conflicting files and ask for confirmation
+///
+/// # Errors
+///
+/// Returns an error if stdin/stdout operations fail.
 pub fn confirm_apply_with_conflicts(conflicts: &[String]) -> Result<bool> {
     use crossterm::style::Stylize;
 
@@ -236,7 +254,8 @@ pub fn confirm_apply_with_conflicts(conflicts: &[String]) -> Result<bool> {
     }
 
     if conflicts.len() > 10 {
-        println!("  ... and {} more files", conflicts.len() - 10);
+        let remaining = conflicts.len() - 10;
+        println!("  ... and {remaining} more files");
     }
 
     println!("\nApplying will overwrite your local changes in these files.");

@@ -14,6 +14,7 @@ pub struct AgentStyle {
 }
 
 impl AgentStyle {
+    #[must_use]
     pub fn for_agent(name: &str) -> Self {
         match name.to_lowercase().as_str() {
             "claude" => AgentStyle {
@@ -37,7 +38,7 @@ impl AgentStyle {
 }
 
 /// Status of an agent execution
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum AgentStatus {
     Pending,
     Running,
@@ -46,7 +47,7 @@ pub enum AgentStatus {
 }
 
 impl AgentStatus {
-    fn emoji(&self) -> &'static str {
+    fn emoji(self) -> &'static str {
         match self {
             AgentStatus::Pending => "⏳",
             AgentStatus::Running => "🔄",
@@ -58,20 +59,21 @@ impl AgentStatus {
 
 /// Progress tracker for multiple agents
 pub struct ProgressTracker {
-    #[allow(dead_code)]
     multi_progress: MultiProgress,
     bars: HashMap<String, ProgressBar>,
 }
 
 impl ProgressTracker {
     /// Create a new progress tracker for the given agent names
+    #[must_use]
     pub fn new(agent_names: &[&str]) -> Self {
         let multi_progress = MultiProgress::new();
         let mut bars = HashMap::new();
 
         // Create spinner style with custom characters
+        // The template is a constant string, so it should always be valid.
         let spinner_style = ProgressStyle::with_template("{spinner:.bold} {prefix:.bold} {msg}")
-            .unwrap()
+            .unwrap_or_else(|_| ProgressStyle::default_spinner())
             .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏");
 
         for name in agent_names {
@@ -95,7 +97,7 @@ impl ProgressTracker {
     }
 
     /// Update the status of an agent
-    pub fn update_status(&self, agent_name: &str, status: AgentStatus) {
+    pub fn update_status(&self, agent_name: &str, status: &AgentStatus) {
         if let Some(pb) = self.bars.get(agent_name) {
             match status {
                 AgentStatus::Pending => {
@@ -119,7 +121,7 @@ impl ProgressTracker {
     /// Update with a custom message
     pub fn update_message(&self, agent_name: &str, message: &str) {
         if let Some(pb) = self.bars.get(agent_name) {
-            pb.set_message(format!("🔄 {}", message));
+            pb.set_message(format!("🔄 {message}"));
         }
     }
 
@@ -131,6 +133,7 @@ impl ProgressTracker {
     }
 
     /// Get the multi-progress instance for spawning in background
+    #[must_use]
     pub fn multi_progress(&self) -> &MultiProgress {
         &self.multi_progress
     }
@@ -140,6 +143,7 @@ impl ProgressTracker {
 pub type SharedProgressTracker = Arc<Mutex<ProgressTracker>>;
 
 /// Create a shared progress tracker
+#[must_use]
 pub fn create_shared_tracker(agent_names: &[&str]) -> SharedProgressTracker {
     Arc::new(Mutex::new(ProgressTracker::new(agent_names)))
 }

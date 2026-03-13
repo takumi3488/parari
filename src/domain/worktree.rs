@@ -86,6 +86,10 @@ pub struct WorktreeManager {
 
 impl WorktreeManager {
     /// Create a new worktree manager for the given repository
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the path is not a git repository.
     pub async fn new(repo_path: impl AsRef<Path>) -> Result<Self> {
         let repo_path = git::get_repo_root(repo_path.as_ref()).await?;
 
@@ -96,11 +100,16 @@ impl WorktreeManager {
     }
 
     /// Get the repository path
+    #[must_use]
     pub fn repo_path(&self) -> &Path {
         &self.repo_path
     }
 
     /// Create worktrees for the given executor names
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if worktree creation fails.
     pub async fn create_worktrees(&mut self, executor_names: &[&str]) -> Result<()> {
         // First cleanup old worktrees to stay under limit
         git::cleanup_old_worktrees(&self.repo_path).await?;
@@ -116,6 +125,7 @@ impl WorktreeManager {
     }
 
     /// Get the worktree for a specific executor
+    #[must_use]
     pub fn get_worktree(&self, executor_name: &str) -> Option<&git::WorktreeInfo> {
         self.worktrees
             .iter()
@@ -123,11 +133,16 @@ impl WorktreeManager {
     }
 
     /// Get all worktrees
+    #[must_use]
     pub fn worktrees(&self) -> &[git::WorktreeInfo] {
         &self.worktrees
     }
 
     /// Cleanup all managed worktrees
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the cleanup fails.
     pub async fn cleanup(&mut self) -> Result<()> {
         for worktree in &self.worktrees {
             let _ = git::remove_worktree(&self.repo_path, &worktree.path).await;
@@ -178,9 +193,11 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_worktree_manager_creation() {
-        let cwd = std::env::current_dir().unwrap();
+    async fn test_worktree_manager_creation() -> std::result::Result<(), Box<dyn std::error::Error>>
+    {
+        let cwd = std::env::current_dir()?;
         let manager = WorktreeManager::new(&cwd).await;
         assert!(manager.is_ok());
+        Ok(())
     }
 }

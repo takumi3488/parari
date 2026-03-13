@@ -41,7 +41,11 @@ pub struct ResultInfo {
 }
 
 /// Prepare result information for display
-pub async fn prepare_result_info(
+///
+/// # Errors
+///
+/// Currently this function does not return errors, but the signature is kept for future use.
+pub fn prepare_result_info(
     result: &TaskResult,
     _original_path: &Path,
     _options: &DisplayOptions,
@@ -49,8 +53,7 @@ pub async fn prepare_result_info(
     let files_changed = result
         .change_summary
         .as_ref()
-        .map(|s| s.files_added + s.files_modified + s.files_deleted)
-        .unwrap_or(0);
+        .map_or(0, |s| s.files_added + s.files_modified + s.files_deleted);
 
     Ok(ResultInfo {
         executor_name: result.execution.executor_name.clone(),
@@ -65,6 +68,10 @@ pub async fn prepare_result_info(
 }
 
 /// Apply the selected result to the target directory
+///
+/// # Errors
+///
+/// Returns an error if file operations fail during the copy.
 pub async fn apply_result(result: &TaskResult, target: &Path) -> Result<()> {
     git::apply_changes(&result.worktree_path, target).await
 }

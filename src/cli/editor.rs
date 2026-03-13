@@ -9,12 +9,17 @@ use tempfile::NamedTempFile;
 /// Opens an editor for the user to enter a prompt.
 /// Uses $EDITOR environment variable, falling back to vi.
 /// Returns the entered text, or an error if the editor fails or returns empty input.
+///
+/// # Errors
+///
+/// Returns an error if the temporary file cannot be created, the editor fails to start,
+/// the editor exits with a non-zero status, the file cannot be read, or no prompt is entered.
 pub fn open_editor_for_prompt() -> Result<String> {
     let editor = env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
 
     // Create a temporary file with instructions
     let mut temp_file = NamedTempFile::new().map_err(|e| Error::EditorFailed {
-        message: format!("Failed to create temporary file: {}", e),
+        message: format!("Failed to create temporary file: {e}"),
     })?;
 
     // Write initial content with instructions
@@ -22,7 +27,7 @@ pub fn open_editor_for_prompt() -> Result<String> {
     temp_file
         .write_all(initial_content.as_bytes())
         .map_err(|e| Error::EditorFailed {
-            message: format!("Failed to write to temporary file: {}", e),
+            message: format!("Failed to write to temporary file: {e}"),
         })?;
 
     let temp_path = temp_file.path().to_path_buf();
@@ -32,18 +37,18 @@ pub fn open_editor_for_prompt() -> Result<String> {
         .arg(&temp_path)
         .status()
         .map_err(|e| Error::EditorFailed {
-            message: format!("Failed to start editor '{}': {}", editor, e),
+            message: format!("Failed to start editor '{editor}': {e}"),
         })?;
 
     if !status.success() {
         return Err(Error::EditorFailed {
-            message: format!("Editor '{}' exited with non-zero status", editor),
+            message: format!("Editor '{editor}' exited with non-zero status"),
         });
     }
 
     // Read the result
     let content = fs::read_to_string(&temp_path).map_err(|e| Error::EditorFailed {
-        message: format!("Failed to read temporary file: {}", e),
+        message: format!("Failed to read temporary file: {e}"),
     })?;
 
     // Filter out comment lines and trim

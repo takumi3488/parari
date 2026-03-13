@@ -66,36 +66,54 @@ impl MockExecutor {
     }
 
     /// Set whether the executor is available
+    #[must_use]
     pub fn with_available(mut self, available: bool) -> Self {
         self.available = available;
         self
     }
 
     /// Add a response to return on the next execute call
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
     pub fn with_response(self, result: ExecutionResult) -> Self {
-        self.responses.lock().unwrap().push(result);
+        if let Ok(mut r) = self.responses.lock() {
+            r.push(result);
+        }
         self
     }
 
     /// Add a success response
+    #[must_use]
     pub fn with_success(self, stdout: impl Into<String>) -> Self {
         let result = ExecutionResult::success(self.name.clone(), stdout.into());
         self.with_response(result)
     }
 
     /// Add a failure response
+    #[must_use]
     pub fn with_failure(self, stderr: impl Into<String>, exit_code: Option<i32>) -> Self {
         let result = ExecutionResult::failure(self.name.clone(), stderr.into(), exit_code);
         self.with_response(result)
     }
 
     /// Add a file action to perform during execution
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
     pub fn with_file_action(self, action: FileAction) -> Self {
-        self.file_actions.lock().unwrap().push(action);
+        if let Ok(mut fa) = self.file_actions.lock() {
+            fa.push(action);
+        }
         self
     }
 
     /// Add a file write action
+    #[must_use]
     pub fn with_file(self, path: impl Into<String>, content: impl Into<String>) -> Self {
         self.with_file_action(FileAction::Write {
             path: path.into(),
@@ -104,42 +122,50 @@ impl MockExecutor {
     }
 
     /// Add a file delete action
+    #[must_use]
     pub fn with_delete(self, path: impl Into<String>) -> Self {
         self.with_file_action(FileAction::Delete { path: path.into() })
     }
 
     /// Add a directory creation action
+    #[must_use]
     pub fn with_dir(self, path: impl Into<String>) -> Self {
         self.with_file_action(FileAction::CreateDir { path: path.into() })
     }
 
     /// Get all recorded calls
+    #[must_use]
     pub fn calls(&self) -> Vec<MockCall> {
-        self.calls.lock().unwrap().clone()
+        self.calls.lock().map_or_else(|_| Vec::new(), |c| c.clone())
     }
 
     /// Get the number of times execute was called
+    #[must_use]
     pub fn call_count(&self) -> usize {
-        self.calls.lock().unwrap().len()
+        self.calls.lock().map_or(0, |c| c.len())
     }
 
     /// Check if execute was called with the given prompt
+    #[must_use]
     pub fn was_called_with(&self, prompt: &str) -> bool {
         self.calls
             .lock()
-            .unwrap()
-            .iter()
-            .any(|call| call.prompt == prompt)
+            .is_ok_and(|c| c.iter().any(|call| call.prompt == prompt))
     }
 
     /// Clear all recorded calls
     pub fn clear_calls(&self) {
-        self.calls.lock().unwrap().clear();
+        if let Ok(mut c) = self.calls.lock() {
+            c.clear();
+        }
     }
 
     /// Perform the configured file actions in the given directory
     async fn perform_file_actions(&self, working_dir: &Path) -> Result<()> {
-        let actions = self.file_actions.lock().unwrap().clone();
+        let actions = self
+            .file_actions
+            .lock()
+            .map_or_else(|_| Vec::new(), |fa| fa.clone());
 
         for action in actions {
             match action {
@@ -189,16 +215,18 @@ impl Executor for MockExecutor {
 
     async fn execute(&self, prompt: &str, working_dir: &Path) -> Result<ExecutionResult> {
         // Record the call
-        self.calls.lock().unwrap().push(MockCall {
-            prompt: prompt.to_string(),
-            working_dir: working_dir.to_path_buf(),
-        });
+        if let Ok(mut calls) = self.calls.lock() {
+            calls.push(MockCall {
+                prompt: prompt.to_string(),
+                working_dir: working_dir.to_path_buf(),
+            });
+        }
 
         // Perform file actions
         self.perform_file_actions(working_dir).await?;
 
         // Return the next configured response, or a default success
-        let response = self.responses.lock().unwrap().pop();
+        let response = self.responses.lock().map_or(None, |mut r| r.pop());
         Ok(response.unwrap_or_else(|| ExecutionResult::success(self.name.clone(), String::new())))
     }
 }
@@ -222,78 +250,79 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_mock_executor_records_calls() {
+    async fn test_mock_executor_records_calls() -> Result<()> {
         let mock = MockExecutor::new("test");
         let working_dir = PathBuf::from("/tmp");
 
-        mock.execute("test prompt", &working_dir).await.unwrap();
+        mock.execute("test prompt", &working_dir).await?;
 
         assert_eq!(mock.call_count(), 1);
         assert!(mock.was_called_with("test prompt"));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_mock_executor_returns_configured_response() {
+    async fn test_mock_executor_returns_configured_response() -> Result<()> {
         let mock = MockExecutor::new("test").with_success("test output");
 
         let working_dir = PathBuf::from("/tmp");
-        let result = mock.execute("test prompt", &working_dir).await.unwrap();
+        let result = mock.execute("test prompt", &working_dir).await?;
 
         assert!(result.success);
         assert_eq!(result.stdout, "test output");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_mock_executor_returns_failure() {
+    async fn test_mock_executor_returns_failure() -> Result<()> {
         let mock = MockExecutor::new("test").with_failure("error message", Some(1));
 
         let working_dir = PathBuf::from("/tmp");
-        let result = mock.execute("test prompt", &working_dir).await.unwrap();
+        let result = mock.execute("test prompt", &working_dir).await?;
 
         assert!(!result.success);
         assert_eq!(result.stderr, "error message");
         assert_eq!(result.exit_code, Some(1));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_mock_executor_creates_file() {
+    async fn test_mock_executor_creates_file() -> Result<()> {
         let temp_dir = std::env::temp_dir().join("parari_test_mock_file");
-        tokio::fs::create_dir_all(&temp_dir).await.unwrap();
+        tokio::fs::create_dir_all(&temp_dir).await?;
 
         let mock = MockExecutor::new("test")
             .with_file("test.txt", "Hello, World!")
             .with_success("Created file");
 
-        let result = mock.execute("create a file", &temp_dir).await.unwrap();
+        let result = mock.execute("create a file", &temp_dir).await?;
 
         assert!(result.success);
-        let content = tokio::fs::read_to_string(temp_dir.join("test.txt"))
-            .await
-            .unwrap();
+        let content = tokio::fs::read_to_string(temp_dir.join("test.txt")).await?;
         assert_eq!(content, "Hello, World!");
 
         // Cleanup
-        tokio::fs::remove_dir_all(&temp_dir).await.unwrap();
+        tokio::fs::remove_dir_all(&temp_dir).await?;
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_mock_executor_creates_nested_file() {
+    async fn test_mock_executor_creates_nested_file() -> Result<()> {
         let temp_dir = std::env::temp_dir().join("parari_test_mock_nested");
-        tokio::fs::create_dir_all(&temp_dir).await.unwrap();
+        tokio::fs::create_dir_all(&temp_dir).await?;
 
         let mock = MockExecutor::new("test")
             .with_file("src/lib.rs", "pub fn hello() {}")
             .with_success("Created nested file");
 
-        let result = mock.execute("create a file", &temp_dir).await.unwrap();
+        let result = mock.execute("create a file", &temp_dir).await?;
 
         assert!(result.success);
-        let content = tokio::fs::read_to_string(temp_dir.join("src/lib.rs"))
-            .await
-            .unwrap();
+        let content = tokio::fs::read_to_string(temp_dir.join("src/lib.rs")).await?;
         assert_eq!(content, "pub fn hello() {}");
 
         // Cleanup
-        tokio::fs::remove_dir_all(&temp_dir).await.unwrap();
+        tokio::fs::remove_dir_all(&temp_dir).await?;
+        Ok(())
     }
 }

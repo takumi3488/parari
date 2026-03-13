@@ -21,6 +21,10 @@ use crate::domain::ResultInfo;
 use crate::error::{Error, Result};
 
 /// Display results in a split view and allow user to select one
+///
+/// # Errors
+///
+/// Returns an error if no results are available, terminal I/O fails, or the user cancels.
 pub fn select_result_split_view(result_infos: &[ResultInfo]) -> Result<usize> {
     if result_infos.is_empty() {
         return Err(Error::NoExecutorsAvailable);
@@ -40,7 +44,8 @@ pub fn select_result_split_view(result_infos: &[ResultInfo]) -> Result<usize> {
                     ViewMode::Log => get_log_content_string(info),
                     ViewMode::Diff => get_diff_content_string(&info.worktree_path),
                 };
-                app.content_height = cached_content.lines().count() as u16;
+                app.content_height =
+                    u16::try_from(cached_content.lines().count()).unwrap_or(u16::MAX);
             }
             last_selected = app.selected_index();
             last_mode = app.current_mode;
@@ -60,7 +65,7 @@ pub fn select_result_split_view(result_infos: &[ResultInfo]) -> Result<usize> {
         {
             let event =
                 event::read().map_err(|e| Error::Io(std::io::Error::other(e.to_string())))?;
-            if app.handle_event(event, viewport_height, &cached_content) {
+            if app.handle_event(&event, viewport_height, &cached_content) {
                 break;
             }
         }

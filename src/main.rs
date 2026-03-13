@@ -32,14 +32,11 @@ async fn main() {
     cleanup_all_registered_worktrees();
 
     if let Err(e) = result {
-        match e {
-            Error::UserCancelled => {
-                eprintln!("Cancelled.");
-            }
-            _ => {
-                cli::show_error(&e);
-                std::process::exit(1);
-            }
+        if let Error::UserCancelled = e {
+            eprintln!("Cancelled.");
+        } else {
+            cli::show_error(&e);
+            std::process::exit(1);
         }
     }
 }
@@ -77,7 +74,7 @@ async fn run() -> Result<()> {
 
     // Collect executor names before moving executors
     let executor_names: Vec<String> = executors.iter().map(|e| e.name().to_string()).collect();
-    let executor_name_refs: Vec<&str> = executor_names.iter().map(|s| s.as_str()).collect();
+    let executor_name_refs: Vec<&str> = executor_names.iter().map(String::as_str).collect();
 
     // Display header with agent info
     display_header(&executor_name_refs);
@@ -97,7 +94,7 @@ async fn run() -> Result<()> {
         .collect();
     let failed: Vec<&str> = executor_names
         .iter()
-        .map(|s| s.as_str())
+        .map(String::as_str)
         .filter(|name| !completed.iter().any(|c| c == name))
         .collect();
 
@@ -115,7 +112,7 @@ async fn run() -> Result<()> {
 
     let mut result_infos = Vec::new();
     for result in &results {
-        let info = domain::prepare_result_info(result, &working_dir, &display_options).await?;
+        let info = domain::prepare_result_info(result, &working_dir, &display_options)?;
         result_infos.push(info);
     }
 
@@ -129,18 +126,18 @@ async fn run() -> Result<()> {
     // Check for conflicts before applying
     let conflicts = git::check_conflicts(&selected_result.worktree_path, &working_dir).await?;
 
-    if !conflicts.is_empty() {
-        // There are conflicting files
-        if !cli::confirm_apply_with_conflicts(&conflicts)? {
+    if conflicts.is_empty() {
+        // No conflicts, but check if target has uncommitted changes
+        let uncommitted_files = git::get_uncommitted_files(&working_dir).await?;
+        if !uncommitted_files.is_empty() && !cli::confirm_overwrite_uncommitted(&uncommitted_files)?
+        {
             cli::show_progress("Apply cancelled.");
             runner.cleanup().await?;
             return Err(Error::UserCancelled);
         }
     } else {
-        // No conflicts, but check if target has uncommitted changes
-        let uncommitted_files = git::get_uncommitted_files(&working_dir).await?;
-        if !uncommitted_files.is_empty() && !cli::confirm_overwrite_uncommitted(&uncommitted_files)?
-        {
+        // There are conflicting files
+        if !cli::confirm_apply_with_conflicts(&conflicts)? {
             cli::show_progress("Apply cancelled.");
             runner.cleanup().await?;
             return Err(Error::UserCancelled);
@@ -178,6 +175,9 @@ fn filter_executors(
 #[cfg(feature = "mock")]
 async fn get_executors(agent_filter: Option<&[String]>) -> Vec<Arc<dyn Executor>> {
     eprintln!("[MOCK MODE] Using mock executors for development");
+
+    // Yield to the async runtime to satisfy the async contract
+    tokio::task::yield_now().await;
 
     let all_executors: Vec<Arc<dyn Executor>> = vec![
         Arc::new(

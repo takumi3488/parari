@@ -20,6 +20,7 @@ pub struct Args {
 
 impl Args {
     /// Parse arguments from command line
+    #[must_use]
     pub fn parse_args() -> Self {
         Self::parse()
     }

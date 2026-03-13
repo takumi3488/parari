@@ -6,11 +6,12 @@ use tokio::process::Command;
 use super::traits::{ExecutionResult, Executor, execute_with_ordered_output};
 use crate::error::{Error, Result};
 
-/// Executor for OpenAI Codex CLI
+/// Executor for `OpenAI` Codex CLI
 #[derive(Debug, Default)]
 pub struct CodexExecutor;
 
 impl CodexExecutor {
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
@@ -18,7 +19,7 @@ impl CodexExecutor {
 
 #[async_trait]
 impl Executor for CodexExecutor {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "codex"
     }
 

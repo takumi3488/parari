@@ -5,6 +5,10 @@ use tokio::process::Command;
 use crate::error::Result;
 
 /// Check if target directory has uncommitted changes
+///
+/// # Errors
+///
+/// Returns an error if the git command fails.
 pub async fn has_uncommitted_changes(target: &Path) -> Result<bool> {
     let output = Command::new("git")
         .args(["status", "--porcelain"])
@@ -17,6 +21,10 @@ pub async fn has_uncommitted_changes(target: &Path) -> Result<bool> {
 }
 
 /// Get list of uncommitted files in target directory
+///
+/// # Errors
+///
+/// Returns an error if the git command fails.
 pub async fn get_uncommitted_files(target: &Path) -> Result<Vec<String>> {
     let output = Command::new("git")
         .args(["status", "--porcelain"])
@@ -37,6 +45,10 @@ pub async fn get_uncommitted_files(target: &Path) -> Result<Vec<String>> {
 /// Check for conflicts between worktree changes and target uncommitted changes
 ///
 /// Returns a list of files that would conflict (exist in both worktree changes and target uncommitted changes)
+///
+/// # Errors
+///
+/// Returns an error if the git commands fail.
 pub async fn check_conflicts(worktree: &Path, target: &Path) -> Result<Vec<String>> {
     let worktree_changes = get_uncommitted_files(worktree).await?;
     let target_changes = get_uncommitted_files(target).await?;
@@ -53,6 +65,10 @@ pub async fn check_conflicts(worktree: &Path, target: &Path) -> Result<Vec<Strin
 /// Apply changes from a worktree to the target directory
 ///
 /// This copies all files from the worktree to the target, excluding .git
+///
+/// # Errors
+///
+/// Returns an error if file operations fail.
 pub async fn apply_changes(worktree: &Path, target: &Path) -> Result<()> {
     copy_dir_recursive(worktree, target).await
 }
@@ -106,6 +122,10 @@ pub struct ChangeSummary {
 }
 
 /// Get a summary of changes in a worktree compared to HEAD
+///
+/// # Errors
+///
+/// Returns an error if the git command fails.
 pub async fn get_change_summary(_original: &Path, worktree: &Path) -> Result<ChangeSummary> {
     // Use git status --porcelain to get all changes including untracked files
     let output = Command::new("git")

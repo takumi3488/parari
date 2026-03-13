@@ -98,9 +98,9 @@ fn render_detail_panel(frame: &mut Frame, app: &App, area: ratatui::layout::Rect
     };
 
     let title = if is_focused {
-        format!("▶ {} ", mode_name)
+        format!("▶ {mode_name} ")
     } else {
-        format!(" {} ", mode_name)
+        format!(" {mode_name} ")
     };
 
     // Build styled content with search highlighting
@@ -119,7 +119,7 @@ fn render_detail_panel(frame: &mut Frame, app: &App, area: ratatui::layout::Rect
             app.search_matches.len()
         )
     } else if !app.search_query.is_empty() {
-        format!("{} [no matches]", title)
+        format!("{title} [no matches]")
     } else {
         title
     };
@@ -147,10 +147,8 @@ fn render_search_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
     frame.render_widget(search_bar, area);
 
     // Set cursor position
-    frame.set_cursor_position(Position::new(
-        area.x + 1 + app.search_query.len() as u16,
-        area.y,
-    ));
+    let query_len = u16::try_from(app.search_query.len()).unwrap_or(u16::MAX);
+    frame.set_cursor_position(Position::new(area.x + 1 + query_len, area.y));
 }
 
 fn render_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
@@ -158,11 +156,10 @@ fn render_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         InputMode::Confirm => {
             let name = app
                 .selected_info()
-                .map(|info| info.executor_name.as_str())
-                .unwrap_or("unknown");
+                .map_or("unknown", |info| info.executor_name.as_str());
             vec![
                 Span::styled(
-                    format!(" Apply changes from {}? ", name),
+                    format!(" Apply changes from {name}? "),
                     Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(" y ", Style::new().fg(Color::Black).bg(Color::Green)),
